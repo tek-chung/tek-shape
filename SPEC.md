@@ -39,7 +39,7 @@ Immediately BELOW EACH post, display exactly five compact icon-only controls in 
 2. Thumbs down: this post is not interesting. Do not interpret this as a permanent ban on its entire discipline.
 3. Double check/tick: keep this topic, but go MORE ADVANCED; the current concept was too familiar.
 4. Bookmark: save independently of the rating.
-5. Book-open: expand/collapse the deeper explanation IN PLACE, directly below that post's controls. It must not open a new page or submit a new chat request.
+5. Book-open: expand/collapse the deeper explanation IN PLACE, within the post and above that post's controls. It must not open a new page or submit a new chat request.
 
 The three ratings are mutually exclusive per post; clicking the selected rating again may clear it. All controls need accessible names, visible selected states and adequate touch targets. Feedback and bookmarks must persist across sessions. Do not require textual labels next to the icons.
 

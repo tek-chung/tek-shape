@@ -94,7 +94,7 @@ export function Feed() {
     <a className="skip-link" href="#main">Skip to reading</a>
     <header className="site-header"><div className="header-inner">
       <div className="brand-lockup"><Link href="/" className="wordmark" aria-label="T home"><Image className="brand-symbol" src="/logo.svg" alt="T" width={38} height={38} priority /></Link><p className="tagline">Know broadly. Explore deeply.</p></div>
-      <span className="local-label"><LockKeyhole size={12} aria-hidden="true" /> LOCAL PROTOTYPE</span>
+      <span className="local-label"><LockKeyhole size={12} aria-hidden="true" /> SAMPLE PROTOTYPE</span>
     </div></header>
     <main id="main" className="reading-column">
       <section className="intro">

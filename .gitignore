@@ -45,6 +45,8 @@ next-env.d.ts
 /test-results/
 /playwright-report/
 /dist/
+/.wrangler/
+.dev.vars*
 *.log
 
 # local personal data and browser profiles (never portfolio content)

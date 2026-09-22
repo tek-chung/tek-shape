@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:cloudflare": "node scripts/build-cloudflare.mjs",
+    "preview:cloudflare": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "deploy": "npm run build:cloudflare && wrangler deploy"
   },
   "dependencies": {
     "lucide-react": "^1.47.0",
@@ -24,7 +27,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.136.2"
   },
   "engines": {
     "node": ">=20.9.0"

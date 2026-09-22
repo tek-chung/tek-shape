@@ -93,6 +93,31 @@ No Supabase, authentication, AI generation, analytics, paid services, accounts o
 5. Scroll into the second batch, refresh, and check that position, ratings and bookmarks return. Repeat after switching between Library and feed.
 6. At 320–390px width, check comfortable text, no sideways scrolling and all five touch controls. With an external keyboard, check visible focus and Enter/Space activation; with Android TalkBack, check labels and selected/expanded announcements.
 
+## Cloudflare sample deployment
+
+Phase 2 uses a Next.js static export hosted by Cloudflare Workers Static Assets. This suits the current browser-only sample feed and keeps the existing local Next.js workflow. A server-capable deployment will be needed when adding private authentication, shared storage and content generation.
+
+```powershell
+npm run build:cloudflare
+npm run preview:cloudflare
+```
+
+Open http://127.0.0.1:8787. To run the browser suite against that preview in a second terminal:
+
+```powershell
+$env:PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:8787'
+npm run test:e2e
+Remove-Item Env:PLAYWRIGHT_BASE_URL
+```
+
+After signing in with `npx wrangler login`, `npm run deploy` builds and publishes the sample app as the `tek-shape` Worker. Only the generated `out/` directory is uploaded; browser reading state is never part of the build. No database or paid service is configured. Cloudflare credentials and local state must remain outside version control.
+
+The hosted sample app is publicly accessible and has no sign-in. Ratings and bookmarks stay in each visitor's browser and do not sync. It is not yet the private personal feed. Physical Android testing remains a manual check using the checklist above.
+
+Phase 2 validation: ESLint, the Cloudflare static production build (including TypeScript) and all seven Chromium browser tests passed against the local Wrangler preview, including 320, 360 and 390px widths. The dependency installation reported zero known vulnerabilities. These checks do not constitute a physical-phone test or an exhaustive security audit.
+
+References: [Cloudflare static hosting](https://developers.cloudflare.com/workers/static-assets/get-started/) and the installed Next.js static-export guide in `node_modules/next/dist/docs/01-app/02-guides/static-exports.md`.
+
 ## Next planned milestones
 
 These are future work, not features implemented or authorisation to connect services:
