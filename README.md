@@ -6,7 +6,7 @@ See [the master project specification](SPEC.md) for the product requirements, ed
 
 A mobile-first personal knowledge feed intended to replace habitual social scrolling with curiosity-driven learning. Built directly in the `tek-shape` repository with Next.js App Router, TypeScript, Tailwind CSS, ESLint and lucide-react.
 
-The source code is intended for a public coding portfolio. Personal reading activity and any future deployed personal app must remain private. This milestone runs locally, with synthetic sample content and browser-only reading state; it does not create a private hosted service. The existing `tek-shape:reading:v1` storage key is retained so the T branding change preserves saved preferences.
+The source code is a public coding portfolio. Personal reading activity and any future deployed personal app must remain private. This milestone runs locally and as a public Cloudflare sample, with synthetic sample content and browser-only reading state; it does not create a private hosted service. The existing `tek-shape:reading:v1` storage key is retained so the T branding change preserves saved preferences.
 
 ## Requirements and setup
 
@@ -82,7 +82,7 @@ src/lib/storage.ts       Storage key and saved-data validation
 tests/feed.spec.ts       Browser interaction and phone-width checks
 ```
 
-No Supabase, authentication, AI generation, analytics, paid services, accounts or deployment. No external fonts or images are fetched by the app. Source links navigate externally only when opened. `.gitignore` excludes `.env*`, dependencies, build outputs and test artefacts. Do not add secrets or personal reading exports to the repository.
+No Supabase, authentication, AI generation, in-app analytics, paid services or reader accounts. The sample app is deployed on Cloudflare. No external fonts or images are fetched by the app. Source links navigate externally only when opened. `.gitignore` excludes `.env*`, dependencies, build outputs and test artefacts. Do not add secrets or personal reading exports to the repository.
 
 ## Manual phone checks
 
@@ -94,6 +94,8 @@ No Supabase, authentication, AI generation, analytics, paid services, accounts o
 6. At 320–390px width, check comfortable text, no sideways scrolling and all five touch controls. With an external keyboard, check visible focus and Enter/Space activation; with Android TalkBack, check labels and selected/expanded announcements.
 
 ## Cloudflare sample deployment
+
+Live sample: [tek-shape.tekkanchung.workers.dev](https://tek-shape.tekkanchung.workers.dev). Public source: [tek-chung/tek-shape](https://github.com/tek-chung/tek-shape).
 
 Phase 2 uses a Next.js static export hosted by Cloudflare Workers Static Assets. This suits the current browser-only sample feed and keeps the existing local Next.js workflow. A server-capable deployment will be needed when adding private authentication, shared storage and content generation.
 
@@ -114,7 +116,7 @@ After signing in with `npx wrangler login`, `npm run deploy` builds and publishe
 
 The hosted sample app is publicly accessible and has no sign-in. Ratings and bookmarks stay in each visitor's browser and do not sync. It is not yet the private personal feed. Physical Android testing remains a manual check using the checklist above.
 
-Phase 2 validation: ESLint, the Cloudflare static production build (including TypeScript) and all seven Chromium browser tests passed against the local Wrangler preview, including 320, 360 and 390px widths. The dependency installation reported zero known vulnerabilities. These checks do not constitute a physical-phone test or an exhaustive security audit.
+Phase 2 validation: ESLint and the Cloudflare static production build (including TypeScript) passed. All seven Chromium browser tests passed against both the local Wrangler preview and the live HTTPS deployment, including 320, 360 and 390px widths. The dependency installation reported zero known vulnerabilities. These checks do not constitute a physical-phone test or an exhaustive security audit.
 
 References: [Cloudflare static hosting](https://developers.cloudflare.com/workers/static-assets/get-started/) and the installed Next.js static-export guide in `node_modules/next/dist/docs/01-app/02-guides/static-exports.md`.
 
