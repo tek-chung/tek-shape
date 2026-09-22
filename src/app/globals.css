@@ -15,8 +15,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible, article:focus-visi
 .site-header { border-bottom: 1px solid var(--line); }
 .header-inner { max-width: 1000px; padding: 23px 32px; margin: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .wordmark { display: flex; align-items: center; gap: 5px; font-size: 21px; letter-spacing: -.8px; font-weight: 700; text-decoration: none; color: var(--ink); }
-.wordmark > span:last-child { font-weight: 400; }
-.brand-symbol { background: var(--ink); color: #eff3e9; border-radius: 9px; width: 35px; height: 35px; display: grid; place-items: center; margin-right: 7px; }
+.brand-lockup { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tagline { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.brand-symbol { display: block; width: 38px; height: 38px; flex-shrink: 0; }
 .local-label { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 1.2px; color: var(--muted); }
 .reading-column { max-width: 660px; padding: 0 24px; margin: auto; }
 .intro { padding: 52px 0 35px; }
@@ -73,7 +74,7 @@ h1 em { color: #597057; font-weight: 400; }
 footer { border-top: 1px solid var(--line); margin-top: 12px; padding: 24px 12px 40px; text-align: center; color: var(--muted); font-size: 11px; line-height: 1.9; }
 footer span { font-size: 10px; }
 @media (max-width: 420px) {
-  .header-inner { padding: 17px 18px; }.local-label { font-size: 8px; letter-spacing: .7px; }
+  .header-inner { padding: 17px 18px; flex-wrap: wrap; row-gap: 8px; }.local-label { font-size: 8px; letter-spacing: .7px; margin-left: auto; }
   .reading-column { padding: 0 16px; }.intro { padding: 37px 3px 29px; }
   .post-body { padding: 23px 20px 14px; }.post-card h2 { font-size: 27px; }
   .feedback { padding: 9px 13px; gap: 6px; }.control-divider { margin: 0 1px; }

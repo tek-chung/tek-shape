@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowDown, Bookmark, Layers2, LockKeyhole, Sprout } from "lucide-react";
 import { posts } from "@/data/posts";
 import { emptyPost, initialState, parseState, STORAGE_KEY } from "@/lib/storage";
@@ -92,7 +93,7 @@ export function Feed() {
   return <>
     <a className="skip-link" href="#main">Skip to reading</a>
     <header className="site-header"><div className="header-inner">
-      <Link href="/" className="wordmark" aria-label="tek shape home"><span className="brand-symbol"><Layers2 size={21} aria-hidden="true" /></span>tek<span>shape</span></Link>
+      <div className="brand-lockup"><Link href="/" className="wordmark" aria-label="T home"><Image className="brand-symbol" src="/logo.svg" alt="T" width={38} height={38} priority /></Link><p className="tagline">Know broadly. Explore deeply.</p></div>
       <span className="local-label"><LockKeyhole size={12} aria-hidden="true" /> LOCAL PROTOTYPE</span>
     </div></header>
     <main id="main" className="reading-column">

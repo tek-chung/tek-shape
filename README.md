@@ -1,6 +1,12 @@
-# tek shape
+# T
 
-A mobile-first, local personal knowledge-feed prototype. Built directly in this repository with Next.js App Router, TypeScript, Tailwind CSS, ESLint and lucide-react.
+**Know broadly. Explore deeply.**
+
+See [the master project specification](SPEC.md) for the product requirements, editorial standards, target architecture, phased roadmap and working agreement. It describes the intended product; the implementation status is documented below.
+
+A mobile-first personal knowledge feed intended to replace habitual social scrolling with curiosity-driven learning. Built directly in the `tek-shape` repository with Next.js App Router, TypeScript, Tailwind CSS, ESLint and lucide-react.
+
+The source code is intended for a public coding portfolio. Personal reading activity and any future deployed personal app must remain private. This milestone runs locally, with synthetic sample content and browser-only reading state; it does not create a private hosted service. The existing `tek-shape:reading:v1` storage key is retained so the T branding change preserves saved preferences.
 
 ## Requirements and setup
 
@@ -77,3 +83,23 @@ tests/feed.spec.ts       Browser interaction and phone-width checks
 ```
 
 No Supabase, authentication, AI generation, analytics, paid services, accounts or deployment. No external fonts or images are fetched by the app. Source links navigate externally only when opened. `.gitignore` excludes `.env*`, dependencies, build outputs and test artefacts. Do not add secrets or personal reading exports to the repository.
+
+## Manual phone checks
+
+1. Use a fresh browser profile to check that four posts appear and **Keep scrolling** reveals the other four.
+2. Try all three ratings on one post: only one should remain selected; tap it again to clear. Other posts should be unaffected.
+3. Bookmark a rated post, open Library, then remove the bookmark. The rating should remain.
+4. Open and close a deeper explanation using the book icon. Only that post should expand in place.
+5. Scroll into the second batch, refresh, and check that position, ratings and bookmarks return. Repeat after switching between Library and feed.
+6. At 320–390px width, check comfortable text, no sideways scrolling and all five touch controls. With an external keyboard, check visible focus and Enter/Space activation; with Android TalkBack, check labels and selected/expanded announcements.
+
+## Next planned milestones
+
+These are future work, not features implemented or authorisation to connect services:
+
+1. Test the reading loop on a physical Android phone; refine density, navigation and accessibility from actual use.
+2. Add a reviewed evergreen-content workflow with provenance and explicit editorial status, keeping sample content separate.
+3. Define and test local preference-based topic and difficulty selection, including transparent reset controls.
+4. Design private storage, retention and access controls before considering cross-device sync or a personal deployment. Keep runtime data and credentials out of the public code repository.
+
+Committing, pushing, connecting accounts and deploying each require explicit approval. Personal-data directories, exports, local JSON data, browser profiles and database files are ignored as an additional safeguard; `.gitignore` is not an access-control mechanism and cannot protect files already tracked by Git.

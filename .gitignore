@@ -46,3 +46,14 @@ next-env.d.ts
 /playwright-report/
 /dist/
 *.log
+
+# local personal data and browser profiles (never portfolio content)
+/personal-data/
+/private-data/
+/reading-history/
+/exports/
+/browser-profile/
+*.local.json
+*.sqlite
+*.sqlite3
+*.db
