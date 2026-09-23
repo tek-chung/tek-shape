@@ -1,5 +1,8 @@
 import { defineConfig } from "@playwright/test";
 import { STORAGE_STATE } from "./tests/global-setup";
+import nextEnv from "@next/env";
+
+nextEnv.loadEnvConfig(process.cwd());
 
 const externalURL = process.env.PLAYWRIGHT_BASE_URL;
 
@@ -10,7 +13,7 @@ export default defineConfig({
   globalSetup: "./tests/global-setup.ts",
   fullyParallel: false,
   use: {
-    baseURL: externalURL ?? "http://127.0.0.1:3000",
+    baseURL: externalURL ?? "http://127.0.0.1:3100",
     browserName: "chromium",
     viewport: { width: 360, height: 800 },
     isMobile: true,
@@ -20,9 +23,9 @@ export default defineConfig({
   webServer: externalURL
     ? undefined
     : {
-        command: "npm run start -- --hostname 127.0.0.1",
-        url: "http://127.0.0.1:3000",
-        reuseExistingServer: !process.env.CI,
-        timeout: 60000,
+        command: "node scripts/test-server.mjs",
+        url: "http://127.0.0.1:3100",
+        reuseExistingServer: false,
+        timeout: 180000,
       },
 });

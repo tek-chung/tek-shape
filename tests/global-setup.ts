@@ -35,7 +35,7 @@ export default async function globalSetup() {
   const url = required("PLAYWRIGHT_SUPABASE_URL");
   const publishableKey = required("PLAYWRIGHT_SUPABASE_PUBLISHABLE_KEY");
   const serviceKey = required("PLAYWRIGHT_SUPABASE_SERVICE_ROLE_KEY");
-  if (url === process.env.NEXT_PUBLIC_SUPABASE_URL) {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || new URL(url).origin === new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin) {
     throw new Error("PLAYWRIGHT_SUPABASE_URL matches your personal project. Use a disposable one.");
   }
 
@@ -75,8 +75,7 @@ export default async function globalSetup() {
     published_at: new Date(BASE - index * 60_000).toISOString(),
   }));
 
-  // The collection is exactly one page long, so the feed would never paginate.
-  // Filler below it makes infinite scroll and the cursor genuinely exercised.
+  // Additional filler exercises multiple complete pages and a final partial page.
   const filler = Array.from({ length: 14 }, (_, index) => ({
     id: `paging-filler-${String(index).padStart(2, "0")}`,
     topic: "Test",
@@ -97,23 +96,33 @@ export default async function globalSetup() {
   await admin.from("user_post_state").delete().eq("user_id", userId);
   await admin.from("reading_progress").delete().eq("user_id", userId);
 
-  const anon = createClient(url, publishableKey, { auth: { persistSession: false } });
+  // Let the installed SDK produce its own storage format. SupabaseClient.ts uses
+  // sb-<first hostname segment>-auth-token; GoTrueClient._saveSession serialises
+  // the whole session through setItemAsync when userStorage is not configured.
+  const sessionStorage = new Map<string, string>();
+  const anon = createClient(url, publishableKey, { auth: {
+    persistSession: true,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+    flowType: "pkce",
+    storage: {
+      getItem: (key) => sessionStorage.get(key) ?? null,
+      setItem: (key, value) => { sessionStorage.set(key, value); },
+      removeItem: (key) => { sessionStorage.delete(key); },
+    },
+  } });
   const { data: signedIn, error: signInError } = await anon.auth.signInWithPassword({
     email: TEST_EMAIL,
     password: TEST_PASSWORD,
   });
   if (signInError || !signedIn.session) throw new Error(`Could not sign the test user in: ${signInError?.message}`);
 
-  // supabase-js persists the session under sb-<project ref>-auth-token.
-  const projectRef = new URL(url).hostname.split(".")[0];
   const storage = {
     cookies: [],
     origins: [
       {
-        origin: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
-        localStorage: [
-          { name: `sb-${projectRef}-auth-token`, value: JSON.stringify(signedIn.session) },
-        ],
+        origin: new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3100").origin,
+        localStorage: Array.from(sessionStorage, ([name, value]) => ({ name, value })),
       },
     ],
   };

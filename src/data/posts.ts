@@ -84,4 +84,31 @@ export const posts: SeedPost[] = [
     deeper: "The second law says that total entropy cannot decrease in an isolated system. Local decreases are possible when accompanied by sufficient increases elsewhere: a refrigerator cools its interior while using work and releasing heat into the room. Living organisms likewise exchange energy and matter with their surroundings. Their local organisation is compatible with the second law because they are not isolated systems.",
     source: { label: "OpenStax · The laws of thermodynamics", url: "https://openstax.org/books/biology-2e/pages/6-3-the-laws-of-thermodynamics" },
   },
+  {
+    id: "mathematics-weighted-averages", topic: "Mathematics", title: "An average needs its weights",
+    explanation: [
+      "Suppose one group contains two people with an average score of 10, while another contains eight people with an average score of 20. Averaging the two group averages gives 15, but the average across all ten people is 18: (2 × 10 + 8 × 20) ÷ 10.",
+      "Each group average represents a different number of observations. To combine them, recover each group's total, add the totals, then divide by the combined number of observations. Equal weighting answers a different question: what is the average group average?",
+    ],
+    insight: "Before combining averages, ask how many observations each one represents.",
+    deeper: "The same issue appears when comparing rates. Two journeys covering equal distances do not necessarily take equal times, so averaging their speeds equally will usually not give the speed for the combined journey. Start from total distance divided by total time.",
+  },
+  {
+    id: "logic-necessary-sufficient", topic: "Logic", title: "A requirement is not a guarantee",
+    explanation: [
+      "A square must have four sides. Having four sides is therefore necessary for being a square, but it is not sufficient: many four-sided shapes are not squares. Being a square is sufficient to establish that a shape has four sides.",
+      "This distinction helps when assessing an argument. Showing that a requirement is met does not establish the conclusion unless that requirement also guarantees it. Ask whether a counterexample could meet the stated condition without producing the promised result.",
+    ],
+    insight: "Something can be required for an outcome without being enough to produce it.",
+    deeper: "If P implies Q, P is sufficient for Q and Q is necessary for P. Reversing the implication requires a separate argument. Establishing both directions gives an equivalence: P holds if and only if Q holds.",
+  },
+  {
+    id: "operations-bottleneck", topic: "Operations", title: "The slowest stage sets the pace",
+    explanation: [
+      "Imagine a simple production line with three stages that can process 12, 5 and 9 items per hour. Every item must pass through all three stages. Even with enough demand and supplies, sustained output cannot exceed five items per hour while those capacities remain fixed.",
+      "Making the first stage faster does not raise that limit. It may simply create a larger queue before the second stage. Improving the constrained stage is what can increase the capacity of the whole line.",
+    ],
+    insight: "Improving one part helps the whole system only when it addresses the actual constraint.",
+    deeper: "This example assumes a steady process without rework, failures or alternative routes. Real systems add variability, so queues and buffers matter too. Once the second stage exceeds nine items per hour, the third stage becomes the new capacity limit.",
+  },
 ];
