@@ -6,7 +6,7 @@ Session date: 2026-09-23. Agent: Codex.
 
 The owner asked to close the gap between passing offline checks and the client actually
 running against Supabase. Stop for user-entered credentials and magic links; do not obtain
-these on their behalf. No live database requests have been made in this session.
+these on their behalf. Live seeding has now succeeded; see the latest checkpoint below.
 
 The previous Phase 3 work is committed at `715522c`; its old handoff warning about an
 uncommitted mixed tree was stale. This handoff's changes are committed separately.
@@ -86,3 +86,16 @@ safe dashboard URLs and whether either already has the migration. No answer yet.
 - `@next/env` needs a default ESM import. Use its `loadEnvConfig` method.
 - Reading data is local-first with a persisted outbox. Never disable controls to await sync.
 - Service worker caches app shell/static assets; Supabase requests are not cached.
+
+## 7. Latest checkpoint — personal project seeded
+
+The user reports that the personal Supabase project exists and the migration is applied.
+Verified the three personal configuration fields are populated without printing values.
+Ran `npm run seed` against that configured project: succeeded, 11 sample posts readable.
+A service-role count query confirmed exactly one enrolled reader without displaying identity.
+Started `npm run dev -- --hostname 127.0.0.1`: ready at http://127.0.0.1:3000.
+
+Now paused for the user to request and open their magic link in the same browser/profile.
+Do not retrieve credentials or magic links on their behalf. No browser sign-in, sync status
+transition or live paging has yet been verified. The disposable test project remains unconfirmed.
+No code changed at this checkpoint; the last full offline check results remain those above.
