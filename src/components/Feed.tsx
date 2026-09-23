@@ -216,8 +216,7 @@ export function Feed({
           </span>
         </div>
         <p className="sample-note">
-          SAMPLE COLLECTION · Illustrative evergreen content, not verified editorial content. Links are for further
-          reading.
+          Posts marked SAMPLE are illustrative, not verified editorial content. Published posts include their sources.
         </p>
         <details className="guide">
           <summary>A quick guide to the five controls</summary>
@@ -226,8 +225,8 @@ export function Feed({
             difficulty. Bookmark: save independently. Book: open or close the deeper explanation.
           </p>
           <p>
-            Choose one rating per post; tap it again to clear. Preferences sync privately across your devices. They do
-            not yet change the order of the feed.
+            Choose one rating per post; tap it again to clear. Preferences sync privately across your devices and guide
+            future queue preparation. Posts already in your queue keep their order.
           </p>
         </details>
         {error && (

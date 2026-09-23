@@ -1,0 +1,20 @@
+[
+  {
+    "publisher": "Quanta Magazine",
+    "hosts": ["www.quantamagazine.org"],
+    "feeds": ["https://www.quantamagazine.org/feed/"],
+    "articles": []
+  },
+  {
+    "publisher": "Aeon",
+    "hosts": ["aeon.co"],
+    "feeds": ["https://aeon.co/feed.rss"],
+    "articles": []
+  },
+  {
+    "publisher": "NASA",
+    "hosts": ["www.nasa.gov", "science.nasa.gov"],
+    "feeds": ["https://www.nasa.gov/feed/"],
+    "articles": []
+  }
+]

@@ -138,7 +138,24 @@ export function coercePost(value: unknown): Post | null {
     .filter((paragraph): paragraph is string => paragraph !== null);
   if (!explanation.length) return null;
   const source = coerceSource(value.source);
-  return { id, topic, title, explanation, insight, deeper, publishedAt, ...(source ? { source } : {}) };
+  const sources: NonNullable<Post["sources"]> = [];
+  if (Array.isArray(value.sources)) for (const entry of value.sources.slice(0,10)) {
+    if (!isObject(entry)) return null;
+    const citation = coerceSource({label:entry.title,url:entry.url});
+    const publisher = coerceText(entry.publisher,200);
+    const accessedAt = coerceText(entry.accessedAt,40);
+    const articleDate = entry.articleDate === null ? null : coerceText(entry.articleDate,40);
+    if (!citation || !publisher || !accessedAt || !Number.isFinite(Date.parse(accessedAt))
+      || (entry.articleDate !== null && (!articleDate || !Number.isFinite(Date.parse(articleDate))))) return null;
+    sources.push({url:citation.url,title:citation.label,publisher,accessedAt,articleDate});
+  }
+  const status = value.status === "published" ? "published" : "sample";
+  const contentType = value.contentType === "news" ? "news" : "evergreen";
+  if (status === "published" && !sources.length) return null;
+  const eventDate = typeof value.eventDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.eventDate)
+    && Number.isFinite(Date.parse(value.eventDate)) ? value.eventDate : undefined;
+  return { id, topic, title, explanation, insight, deeper, publishedAt, status, contentType, sources,
+    ...(eventDate ? {eventDate} : {}), ...(source ? { source } : {}) };
 }
 
 export function coercePosts(value: unknown): Post[] {

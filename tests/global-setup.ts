@@ -92,6 +92,13 @@ export default async function globalSetup() {
   const { error: seedError } = await admin.from("post").upsert([...sample, ...filler], { onConflict: "id" });
   if (seedError) throw new Error(`Could not seed content: ${seedError.message}`);
 
+  const { error: clearQueueError } = await admin.from("feed_queue").delete().eq("user_id", userId);
+  if (clearQueueError) throw new Error(`Apply both migrations to the disposable project: ${clearQueueError.message}`);
+  const { error: queueError } = await admin.from("feed_queue").insert([...sample,...filler].map((post,index) => ({
+    user_id:userId,post_id:post.id,position:index+1,
+  })));
+  if (queueError) throw new Error(`Could not prepare test queue: ${queueError.message}`);
+
   // Start each run from a clean slate so position and ratings are deterministic.
   await admin.from("user_post_state").delete().eq("user_id", userId);
   await admin.from("reading_progress").delete().eq("user_id", userId);

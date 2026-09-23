@@ -54,6 +54,10 @@ h1 em { color: #597057; font-weight: 400; }
 .insight p { font-size: 14px; line-height: 1.6; margin: 6px 0 0; }
 .source { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #536958; text-decoration: underline; text-underline-offset: 3px; line-height: 1.8; min-height: 44px; }
 .source svg { flex-shrink: 0; }
+/* Plain text beside a link, so it must not look tappable. */
+.source-meta { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 0 0 8px; }
+.post-sources { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.post-sources summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 .deeper { padding: 0 0 8px; }
 .deeper h3 { font: 22px Georgia, serif; margin: 24px 0 12px; }
 .feedback { display: flex; align-items: center; gap: 9px; padding: 10px 22px; border-top: 1px solid var(--line); background: #fcfcf7; }

@@ -16,6 +16,10 @@ export interface SeedPost {
 /** Content as served by `reading_page`. */
 export interface Post extends SeedPost {
   publishedAt: string;
+  status?: "sample" | "published";
+  contentType?: "news" | "evergreen";
+  eventDate?: string;
+  sources?: { url: string; publisher: string; title: string; articleDate: string | null; accessedAt: string }[];
 }
 export interface PostState {
   rating: Rating | null;
