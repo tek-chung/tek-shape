@@ -2,6 +2,7 @@
 
 import { ArrowUpRight } from "lucide-react";
 import type { Post, PostState } from "@/types/post";
+import type { PostPatch } from "@/lib/storage";
 import { FeedbackBar } from "./FeedbackBar";
 
 interface Props {
@@ -9,7 +10,7 @@ interface Props {
   index: number;
   state: PostState;
   disabled: boolean;
-  onChange: (patch: Partial<PostState>) => void;
+  onChange: (patch: PostPatch) => void;
 }
 
 export function PostCard({ post, index, state, disabled, onChange }: Props) {

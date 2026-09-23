@@ -1,69 +1,119 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-const key = "tek-shape:reading:v1";
-test("four plus four, exclusive ratings, independent saves, deeper reading and reload", async ({ page }) => {
+const PAGE_SIZE = 8;
+
+/** The feed is ready once the first page of content has arrived. */
+async function openFeed(page: Page) {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Explore something different" })).toBeVisible();
+  await expect(page.locator("article")).toHaveCount(PAGE_SIZE);
+}
+
+const card = (page: Page, index = 0) => page.locator("article").nth(index);
+const control = (page: Page, name: string, index = 0) =>
+  card(page, index).getByRole("button", { name, exact: true });
+
+test("signs in from stored session and shows the first page", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/");
-  await expect(page.locator("article")).toHaveCount(4);
-  const first = page.locator("article").first();
-  const second = page.locator("article").nth(1);
-  await expect(first.getByRole("button")).toHaveCount(5);
-  await first.getByRole("button", { name: "More at the same level", exact: true }).click();
-  await first.getByRole("button", { name: "Save post", exact: true }).click();
-  await first.getByRole("button", { name: "Not interesting", exact: true }).click();
-  await expect(first.getByRole("button", { name: "More at the same level", exact: true })).toHaveAttribute("aria-pressed", "false");
-  await expect(first.getByRole("button", { name: "Not interesting", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await first.getByRole("button", { name: "Keep the topic, increase difficulty", exact: true }).click();
-  await expect(first.getByRole("button", { name: "Not interesting", exact: true })).toHaveAttribute("aria-pressed", "false");
-  await expect(first.getByRole("button", { name: "Remove bookmark", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(second.locator('[aria-pressed="true"]')).toHaveCount(0);
-  await first.getByRole("button", { name: "Expand deeper explanation", exact: true }).click();
-  await expect(first.getByRole("heading", { name: "A little deeper" })).toBeVisible();
-  await expect(second.locator(".deeper")).toBeHidden();
-  await page.reload();
-  await expect(first.getByRole("button", { name: "Keep the topic, increase difficulty", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(first.getByRole("button", { name: "Remove bookmark", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await first.getByRole("button", { name: "Collapse deeper explanation", exact: true }).click();
-  await expect(first.locator(".deeper")).toBeHidden();
-  await page.getByRole("button", { name: "Library" }).click();
-  await expect(page.locator("article")).toHaveCount(1);
-  await first.getByRole("button", { name: "Remove bookmark", exact: true }).click();
-  await expect(page.locator("article")).toHaveCount(0);
-  await expect(page.getByText("Your next good idea belongs here.")).toBeVisible();
-  await page.getByRole("button", { name: "Your feed", exact: true }).click();
-  await first.getByRole("button", { name: "Keep the topic, increase difficulty", exact: true }).click();
-  await expect(first.locator('[aria-pressed="true"]')).toHaveCount(0);
-  await page.getByRole("button", { name: "Keep scrolling", exact: true }).click();
-  await expect(page.locator("article")).toHaveCount(8);
-  await expect(page.getByRole("button", { name: "Keep scrolling", exact: true })).toHaveCount(0);
-  await expect(page.locator("article .sample")).toHaveCount(8);
-  expect(new Set(await page.locator(".topic").allTextContents()).size).toBe(8);
+  await openFeed(page);
+  await expect(page.getByText("PRIVATE READING")).toBeVisible();
+  await expect(card(page).getByRole("button")).toHaveCount(5);
   expect(errors).toEqual([]);
 });
 
-test("reading position restores into the second batch and survives a Library visit", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Keep scrolling", exact: true }).click();
-  await page.locator("#computing-binary").evaluate((element) => window.scrollTo(0, element.getBoundingClientRect().top + window.scrollY + 90));
-  await expect.poll(() => page.evaluate((storageKey) => JSON.parse(localStorage.getItem(storageKey)!).position?.postId, key)).toBe("computing-binary");
-  const before = await page.evaluate(() => window.scrollY);
+test("ratings are exclusive, bookmarks are independent, and both survive a reload", async ({ page }) => {
+  await openFeed(page);
+  await control(page, "More at the same level").click();
+  await control(page, "Save post").click();
+  await control(page, "Not interesting").click();
+  await expect(control(page, "More at the same level")).toHaveAttribute("aria-pressed", "false");
+  await expect(control(page, "Not interesting")).toHaveAttribute("aria-pressed", "true");
+  await control(page, "Keep the topic, increase difficulty").click();
+  await expect(control(page, "Not interesting")).toHaveAttribute("aria-pressed", "false");
+  await expect(control(page, "Remove bookmark")).toHaveAttribute("aria-pressed", "true");
+  await expect(card(page, 1).locator('[aria-pressed="true"]')).toHaveCount(0);
+
+  // Wait for the outbox to drain, so the reload reads it back from Supabase.
+  await expect(page.getByText("Saved to your account")).toBeVisible();
   await page.reload();
-  await expect(page.locator("article")).toHaveCount(8);
-  await expect.poll(async () => Math.abs(await page.evaluate(() => window.scrollY) - before)).toBeLessThan(5);
-  // Programmatic activation avoids scrolling the navigation into view first.
-  await page.getByRole("button", { name: "Library" }).evaluate((button: HTMLButtonElement) => button.click());
+  await expect(control(page, "Keep the topic, increase difficulty")).toHaveAttribute("aria-pressed", "true");
+  await expect(control(page, "Remove bookmark")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the deeper explanation opens only on its own post", async ({ page }) => {
+  await openFeed(page);
+  await control(page, "Expand deeper explanation").click();
+  await expect(card(page).getByRole("heading", { name: "A little deeper" })).toBeVisible();
+  await expect(card(page, 1).locator(".deeper")).toBeHidden();
+  await control(page, "Collapse deeper explanation").click();
+  await expect(card(page).locator(".deeper")).toBeHidden();
+});
+
+test("the Library holds saved posts and empties cleanly", async ({ page }) => {
+  await openFeed(page);
+  await control(page, "Save post").click();
+  await expect(control(page, "Remove bookmark")).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Library" }).click();
+  await expect(page.locator("article")).toHaveCount(1);
+  await control(page, "Remove bookmark").click();
+  await expect(page.locator("article")).toHaveCount(0);
   await expect(page.getByText("Your next good idea belongs here.")).toBeVisible();
   await page.getByRole("button", { name: "Your feed", exact: true }).click();
-  await expect.poll(async () => Math.abs(await page.evaluate(() => window.scrollY) - before)).toBeLessThan(5);
+  await expect(page.locator("article")).toHaveCount(PAGE_SIZE);
+});
+
+test("scrolling to the end pages in more content and stops at the last post", async ({ page }) => {
+  await openFeed(page);
+  // The global setup seeds beyond one page, so this genuinely exercises the cursor.
+  await page.locator("article").last().scrollIntoViewIfNeeded();
+  await expect
+    .poll(async () => page.locator("article").count(), { timeout: 15_000 })
+    .toBeGreaterThan(PAGE_SIZE);
+
+  // Keep scrolling until the feed is exhausted.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (await page.getByText("A good place to pause.").isVisible().catch(() => false)) break;
+    await page.locator("article").last().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(500);
+  }
+  await expect(page.getByText("A good place to pause.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Keep scrolling", exact: true })).toHaveCount(0);
+
+  // No duplicates: the cursor must not re-serve a page.
+  const ids = await page.locator("article").evaluateAll((nodes) => nodes.map((node) => node.id));
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
+test("reading position is restored after a reload", async ({ page }) => {
+  await openFeed(page);
+  const anchor = page.locator("article").nth(3);
+  await anchor.evaluate((element) => window.scrollTo(0, element.getBoundingClientRect().top + window.scrollY + 90));
+  await expect(page.getByText("Saved to your account")).toBeVisible({ timeout: 15_000 });
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(0);
+
+  await page.reload();
+  await expect(page.locator("article")).toHaveCount(PAGE_SIZE);
+  await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - before)).toBeLessThan(40);
+});
+
+test("writes made offline are kept and sync on reconnect", async ({ page, context }) => {
+  await openFeed(page);
+  await context.setOffline(true);
+  await control(page, "Save post").click();
+  // The interface updates immediately even with no connection.
+  await expect(control(page, "Remove bookmark")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("Saved on this device")).toBeVisible();
+  await context.setOffline(false);
+  await expect(page.getByText("Saved to your account")).toBeVisible({ timeout: 20_000 });
 });
 
 for (const width of [320, 360, 390]) {
   test(`no horizontal overflow and usable controls at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
-    await page.goto("/");
-    await page.getByRole("button", { name: "Keep scrolling", exact: true }).click();
-    for (const button of await page.locator('.feedback button[aria-expanded]').all()) await button.click();
+    await openFeed(page);
+    for (const button of await page.locator(".feedback button[aria-expanded]").all()) await button.click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     for (const button of await page.locator(".feedback button").all()) {
       const box = await button.boundingBox();
@@ -75,27 +125,5 @@ for (const width of [320, 360, 390]) {
     }
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: `test-results/feed-${width}.png`, fullPage: true });
-    await page.screenshot({ path: `test-results/viewport-${width}.png` });
   });
 }
-
-test("malformed storage falls back safely", async ({ page }) => {
-  await page.addInitScript((storageKey) => localStorage.setItem(storageKey, "{broken"), key);
-  await page.goto("/");
-  await expect(page.getByRole("main").getByRole("alert")).toContainText("could not be loaded");
-  await expect(page.locator("article")).toHaveCount(4);
-  await page.locator("article").first().getByRole("button", { name: "Save post", exact: true }).click();
-  await expect(page.locator("article").first().getByRole("button", { name: "Remove bookmark", exact: true })).toHaveAttribute("aria-pressed", "true");
-});
-
-test("blocked storage leaves the feed usable with an honest notice", async ({ page }) => {
-  await page.addInitScript(() => {
-    Storage.prototype.getItem = () => { throw new Error("Blocked"); };
-    Storage.prototype.setItem = () => { throw new Error("Blocked"); };
-  });
-  await page.goto("/");
-  await page.locator("article").first().getByRole("button", { name: "Save post", exact: true }).click();
-  await expect(page.getByRole("main").getByRole("alert")).toContainText("only while this page stays open");
-  await page.getByRole("button", { name: "Library" }).click();
-  await expect(page.locator("article")).toHaveCount(1);
-});

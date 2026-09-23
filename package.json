@@ -7,18 +7,23 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed-content.mjs",
+    "test:sql": "node --test \"tests/sql/*.test.mjs\"",
     "test:e2e": "playwright test",
     "build:cloudflare": "node scripts/build-cloudflare.mjs",
     "preview:cloudflare": "wrangler dev --ip 127.0.0.1 --port 8787",
     "deploy": "npm run build:cloudflare && wrangler deploy"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "lucide-react": "^1.47.0",
     "next": "16.3.5",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@next/env": "16.3.5",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -31,6 +36,6 @@
     "wrangler": "^4.136.2"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.18.0"
   }
 }

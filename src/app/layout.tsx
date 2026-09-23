@@ -1,5 +1,6 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+export const viewport: Viewport = { themeColor: "#263d36" };
 export const metadata: Metadata = {
   title: "T — Know broadly. Explore deeply.",
   description: "T is a personal knowledge feed for curiosity-driven learning. Know broadly. Explore deeply.",

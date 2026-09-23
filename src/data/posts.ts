@@ -1,7 +1,9 @@
-import type { Post } from "@/types/post";
+import type { SeedPost } from "@/types/post";
 
 // Original illustrative summaries, not verified editorial content or current news.
-export const posts: Post[] = [
+// Seed data only: `npm run seed` upserts these into public.post, and the app reads
+// content from the database. Array order becomes feed order, newest first.
+export const posts: SeedPost[] = [
   {
     id: "psychology-retrieval", topic: "Psychology", title: "The useful struggle of remembering",
     explanation: [

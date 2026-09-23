@@ -1,2 +1,2 @@
-import { Feed } from "@/components/Feed";
-export default function Home() { return <Feed />; }
+import { PrivateApp } from "@/components/PrivateApp";
+export default function Home() { return <PrivateApp />; }

@@ -2,6 +2,7 @@
 
 import { BookOpen, Bookmark, CheckCheck, ThumbsDown, ThumbsUp } from "lucide-react";
 import type { PostState, Rating } from "@/types/post";
+import type { PostPatch } from "@/lib/storage";
 
 export const ratingLabels: Record<Rating, string> = {
   more: "More at the same level",
@@ -13,7 +14,7 @@ interface Props {
   postId: string;
   state: PostState;
   disabled: boolean;
-  onChange: (patch: Partial<PostState>) => void;
+  onChange: (patch: PostPatch) => void;
 }
 
 export function FeedbackBar({ postId, state, disabled, onChange }: Props) {

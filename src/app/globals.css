@@ -61,6 +61,7 @@ h1 em { color: #597057; font-weight: 400; }
 .icon-button:hover { background: #edf0e6; }
 .icon-button[aria-pressed="true"], .icon-button[aria-expanded="true"] { color: #244b35; background: #dfe9d5; border-color: #91a57d; box-shadow: inset 0 -2px 0 #66804f; }
 .control-divider { height: 21px; width: 1px; background: var(--line); margin: 0 3px; }
+.scroll-sentinel { height: 1px; }
 .continue, .end-note { text-align: center; padding: 40px 5px 30px; }
 .continue p, .end-note p { font: 22px Georgia, serif; margin: 0 0 17px; }
 .load-button { display: inline-flex; align-items: center; justify-content: center; gap: 28px; background: var(--ink); color: #fffefa; border: none; border-radius: 9px; min-height: 48px; padding: 0 26px; font-size: 13px; }
@@ -80,3 +81,10 @@ footer span { font-size: 10px; }
   .feedback { padding: 9px 13px; gap: 6px; }.control-divider { margin: 0 1px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+.auth-panel { padding-top: 12vh; padding-bottom: 40px; }
+.sign-in-form { display: grid; gap: 14px; margin-top: 32px; }
+.sign-in-form label { font-size: 14px; }
+.sign-in-form input { border: 1px solid var(--line); background: #fffefa; border-radius: 8px; padding: 14px; font: inherit; width: 100%; color: var(--ink); }
+input:focus-visible { outline: 3px solid #8e5d30; outline-offset: 3px; }
+.account-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--muted); }
+.install-app { margin: 20px auto; padding: 0 20px; max-width: 660px; text-align: center; font-size: 12px; color: var(--muted); }

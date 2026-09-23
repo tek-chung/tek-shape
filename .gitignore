@@ -44,6 +44,7 @@ next-env.d.ts
 .npm-cache/
 /test-results/
 /playwright-report/
+/tests/.auth/
 /dist/
 /.wrangler/
 .dev.vars*
