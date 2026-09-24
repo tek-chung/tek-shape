@@ -21,6 +21,8 @@ export interface Post extends SeedPost {
   umbrella?: string;
   field?: string;
   subtopic?: string;
+  /** When the post joined this reader's feed (feed_page only). */
+  queuedAt?: string;
   contentType?: "news" | "evergreen";
   eventDate?: string;
   sources?: { url: string; publisher: string; title: string; articleDate: string | null; accessedAt: string }[];

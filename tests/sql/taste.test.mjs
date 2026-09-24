@@ -17,7 +17,7 @@ before(async () => {
   await db.exec(await migration("202609220001_private_reading"));
   await db.exec(`insert into auth.users values('${reader}'),('${stranger}'); insert into public.allowed_reader(user_id) values('${reader}');`);
   await db.query(`insert into public.post(id,topic,title,explanation,insight,deeper,status,published_at) values('sample-a','T','Title',array['B'],'I','D','sample',now())`);
-  for (const name of ["202609230001_content_engine", "202609240001_model_providers", "202609250001_unread_feed", "202609260001_knowledge_map", "202609270001_taste"])
+  for (const name of ["202609230001_content_engine", "202609240001_model_providers", "202609250001_unread_feed", "202609260001_knowledge_map", "202609270001_taste", "202609280001_feed_queued_at"])
     await db.exec(await migration(name));
 });
 after(async () => db?.close());
@@ -66,4 +66,26 @@ test("the engine writes the snapshot and queue slots; the reader only reads thei
   assert.equal((await db.query("select * from public.topic_preference")).rows.length, 0);
   await role("anon", stranger);
   await assert.rejects(db.query("select public.taste_view()"), /permission denied/);
+});
+
+test("feed items say when they joined the feed, so the app can count what is new", async () => {
+  await role("authenticated");
+  const page = (await db.query("select public.feed_page(null, 8, '2000-01-01'::timestamptz) p")).rows[0].p;
+  assert.ok(page.length >= 1);
+  assert.ok(page.every((p) => Number.isFinite(Date.parse(p.queuedAt)) && p.id && p.title));
+});
+
+test("the summary counts unread posts that joined the feed since the last visit, and names the first", async () => {
+  await role("service_role");
+  await db.query(`insert into public.post(id,topic,title,explanation,insight,deeper,status,published_at) values('sample-b','T','New one',array['B'],'I','D','sample',now())`);
+  await db.query(`insert into public.feed_queue(user_id,post_id,position,queued_at) values($1,'sample-b',(select coalesce(max(position),0)+1 from public.feed_queue where user_id=$1),now())`, [reader]);
+  await role("authenticated");
+  const summary = (await db.query("select public.feed_summary(now(), now() - interval '1 hour') s")).rows[0].s;
+  assert.deepEqual([summary.arrivals, summary.firstArrival], [1, "sample-b"]);
+  assert.equal(summary.unread, 1, "sample-a was read earlier in this file, so only the new one waits");
+  const none = (await db.query("select public.feed_summary(now(), now() + interval '1 hour') s")).rows[0].s;
+  assert.deepEqual([none.arrivals, none.firstArrival], [0, null]);
+  await assert.rejects(db.query("select public.feed_summary(null, now())"), /Invalid window/);
+  await role("authenticated", stranger);
+  await assert.rejects(db.query("select public.feed_summary(now(), now())"), /Private account required/);
 });

@@ -312,6 +312,19 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
   pages only. Workflow: actions v5 (Node 24), `npm ci --ignore-scripts`. That run used CONTENT_CHECKS=strict
   (variable unset): 13 of 26 drafts held by the reviewer.
 
+## 5l. Sittings: refresh brings new posts and clears read ones (28 Sep 2026)
+
+- `useReading`: a *sitting* starts on open/reload, on the Refresh button, or on return after 30 min hidden.
+  Each sitting rebuilds the unread feed from the server to the previous depth (min one page), drops posts
+  read before it (including unsynced local reads), then asks `feed_summary` how many posts joined since the
+  previous sitting (stored in localStorage `tek-shape:visit:v1:<user>`). Feed shows "N new posts since you
+  last looked" with Show me (pages down to the first arrival) and scrolls to top after Refresh/resume.
+  Within a sitting nothing moves. `readBefore` now compares parsed times (server and client formats differ).
+- Read and Library lists merge local not-yet-synced reads/saves ahead of the server's page.
+- Migration `202609280001_feed_queued_at.sql`: `feed_page` rows carry `queuedAt`; `feed_summary(read_before,
+  since)` returns unread, arrivals and firstArrival. SQL tests in `tests/sql/taste.test.mjs` (49 SQL pass).
+- Playwright: "Refresh moves posts read earlier to Read" added (not run here).
+
 ## 6. Next steps
 
 1. **User:** `npm run lint` and `npm run build`.

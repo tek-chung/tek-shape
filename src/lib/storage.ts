@@ -30,6 +30,8 @@ const MAX_LOADED = 5000;
 export const stateKey = (userId: string) => `tek-shape:state:v3:${userId}`;
 export const outboxKey = (userId: string) => `tek-shape:outbox:v3:${userId}`;
 export const postsKey = (userId: string) => `tek-shape:posts:v3:${userId}`;
+/** When the last sitting began, so the next one can say what arrived in between. */
+export const visitKey = (userId: string) => `tek-shape:visit:v1:${userId}`;
 
 // localStorage throws in Safari private mode and when storage is blocked. Never let that break reading.
 export function readLocal(key: string): string | null {
@@ -160,8 +162,10 @@ export function coercePost(value: unknown): Post | null {
   const umbrella = slug(value.umbrella);
   const field = slug(value.field);
   const subtopic = coerceText(value.subtopic, 100) ?? undefined;
+  const queued = coerceText(value.queuedAt, 40);
+  const queuedAt = queued && Number.isFinite(Date.parse(queued)) ? queued : undefined;
   return { id, topic, title, explanation, insight, deeper, publishedAt, status, contentType, sources,
-    ...(umbrella ? { umbrella } : {}), ...(field ? { field } : {}), ...(subtopic ? { subtopic } : {}),
+    ...(umbrella ? { umbrella } : {}), ...(field ? { field } : {}), ...(subtopic ? { subtopic } : {}), ...(queuedAt ? { queuedAt } : {}),
     ...(eventDate ? {eventDate} : {}), ...(source ? { source } : {}) };
 }
 

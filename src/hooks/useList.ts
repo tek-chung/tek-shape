@@ -37,7 +37,12 @@ export function useList(client: SupabaseClient, kind: "bookmarked" | "read", ope
     let active = true;
     Promise.resolve()
       .then(() => fetchPage(0))
-      .then((page) => { if (active) setData({ items: page, atEnd: page.length < LIST_PAGE, offline: false, loaded: true }); })
+      .then((page) => {
+        if (!active) return;
+        // Anything this device has read or saved but the server has not heard about yet still belongs here.
+        const extra = fallbackRef.current.filter((post) => !page.some((listed) => listed.id === post.id));
+        setData({ items: [...extra, ...page], atEnd: page.length < LIST_PAGE, offline: false, loaded: true });
+      })
       .catch(() => { if (active) setData({ items: fallbackRef.current, atEnd: true, offline: true, loaded: true }); });
     return () => { active = false; };
   }, [open, fetchPage]);

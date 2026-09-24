@@ -93,6 +93,19 @@ test("posts read on an earlier visit move from the feed to Read", async ({ page 
   await expect(page.locator(`article[id="${first}"]`)).toBeVisible();
 });
 
+test("Refresh moves posts read earlier to Read without reloading the page", async ({ page }) => {
+  await openFeed(page);
+  const first = await card(page).getAttribute("id");
+  await admin
+    .from("user_post_state")
+    .upsert({ user_id: await testUserId(), post_id: first!, read_at: "2026-01-01T00:00:00Z" }, { onConflict: "user_id,post_id" });
+  await page.getByRole("button", { name: /Refresh/ }).click();
+  await expect(card(page)).not.toHaveAttribute("id", first!);
+  await expect(page.locator(`article[id="${first}"]`)).toHaveCount(0);
+  await page.getByRole("button", { name: "Read", exact: true }).click();
+  await expect(page.locator(`article[id="${first}"]`)).toBeVisible();
+});
+
 test("scrolling to the end pages in more content and stops at the last post", async ({ page }) => {
   await openFeed(page);
   // The global setup seeds beyond one page, so this genuinely exercises the cursor.

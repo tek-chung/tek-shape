@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowDown, Bookmark, CheckCheck, Layers2, LockKeyhole, Map as MapIcon, Sprout } from "lucide-react";
+import { ArrowDown, Bookmark, CheckCheck, Layers2, LockKeyhole, Map as MapIcon, RotateCw, Sparkles, Sprout } from "lucide-react";
 import { emptyPost, type PostPatch } from "@/lib/storage";
 import type { ReadingPosition } from "@/types/post";
 import { useReading } from "@/hooks/useReading";
@@ -23,11 +23,14 @@ export function Feed({
   userId: string;
   onSignOut: () => Promise<void>;
 }) {
-  const { state, posts, ready, pending, syncing, paging, atEnd, error, restore, savePost, saveProgress, loadMore, retry } =
+  const { state, posts, ready, pending, syncing, paging, atEnd, fresh, sitting, error, restore, savePost, saveProgress, loadMore, retry, refreshFeed, dismissFresh, reveal } =
     useReading(client, userId);
   const [view, setView] = useState<View>("feed");
   const library = useList(client, "bookmarked", view === "library", posts.filter((post) => state.posts[post.id]?.bookmarked));
-  const readList = useList(client, "read", view === "read", posts.filter((post) => state.posts[post.id]?.readAt));
+  // Posts read on this device, newest first: shown in Read at once, even before the server has them.
+  const readHere = posts.filter((post) => state.posts[post.id]?.readAt)
+    .sort((a, b) => Date.parse(state.posts[b.id]?.readAt ?? "") - Date.parse(state.posts[a.id]?.readAt ?? ""));
+  const readList = useList(client, "read", view === "read", readHere);
   const [announcement, setAnnouncement] = useState("");
   const current = useRef({ state, saveProgress, savePost, loadMore });
   useEffect(() => {
@@ -117,6 +120,11 @@ export function Feed({
     };
   }, [ready, view, posts]);
 
+  // A new sitting (Refresh, or coming back after a while) starts at the top of the reloaded feed.
+  useEffect(() => {
+    if (sitting) window.scrollTo(0, 0);
+  }, [sitting]);
+
   // Infinite scroll: pull the next page as the sentinel below the feed approaches.
   useEffect(() => {
     if (!ready || view !== "feed" || atEnd) return;
@@ -139,6 +147,11 @@ export function Feed({
       setAnnouncement(patch.rating ? `${ratingLabels[patch.rating]} recorded.` : "Rating cleared.");
     else if (patch.bookmarked !== undefined)
       setAnnouncement(patch.bookmarked ? "Saved to your Library." : "Removed from your Library.");
+  }
+  /** New posts sit at the end of the feed: load down to the first of them, then scroll to it. */
+  async function showFresh(postId: string) {
+    dismissFresh();
+    if (await reveal(postId)) setTimeout(() => document.getElementById(postId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
   }
   function switchView(next: View) {
     if (next === view) return;
@@ -199,6 +212,9 @@ export function Feed({
         </section>
         <div className="account-bar">
           <span role="status">{status}</span>
+          <button className="text-button refresh-button" onClick={refreshFeed} disabled={paging} aria-label="Refresh: check for new posts and move read posts to Read">
+            <RotateCw size={14} aria-hidden="true" /> Refresh
+          </button>
           <button className="text-button" onClick={onSignOut}>
             Sign out
           </button>
@@ -256,6 +272,14 @@ export function Feed({
         <p className="sr-only" role="status">
           {announcement}
         </p>
+        {view === "feed" && fresh && (
+          <div className="fresh-note" role="status">
+            <Sparkles size={15} aria-hidden="true" />
+            <span>{fresh.count === 1 ? "1 new post" : `${fresh.count} new posts`} since you last looked.</span>
+            <button type="button" className="text-button" onClick={() => void showFresh(fresh.firstId)}>Show me</button>
+            <button type="button" className="text-button" onClick={dismissFresh} aria-label="Dismiss">Dismiss</button>
+          </div>
+        )}
         <div className="posts">
           {shown.map((post, index) => (
             <PostCard
