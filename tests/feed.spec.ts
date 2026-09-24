@@ -1,6 +1,23 @@
 import { expect, test, type Page } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 
 const PAGE_SIZE = 8;
+
+// Service access to the DISPOSABLE test project only (global setup refuses the personal one).
+const admin = createClient(process.env.PLAYWRIGHT_SUPABASE_URL ?? "", process.env.PLAYWRIGHT_SUPABASE_SERVICE_ROLE_KEY ?? "", {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+async function testUserId() {
+  const { data } = await admin.auth.admin.listUsers({ perPage: 200 });
+  const users: { id: string; email?: string }[] = data?.users ?? [];
+  return users.find((user) => user.email === "playwright@tek-shape.test")!.id;
+}
+
+// Read posts leave the feed on the next visit, and cards on screen for five seconds count as read, so
+// start every test with nothing read; otherwise the first card would differ from test to test.
+test.beforeEach(async () => {
+  await admin.from("user_post_state").update({ read_at: null }).eq("user_id", await testUserId());
+});
 
 /** The feed is ready once the first page of content has arrived. */
 async function openFeed(page: Page) {
@@ -61,6 +78,19 @@ test("the Library holds saved posts and empties cleanly", async ({ page }) => {
   await expect(page.getByText("Your next good idea belongs here.")).toBeVisible();
   await page.getByRole("button", { name: "Your feed", exact: true }).click();
   await expect(page.locator("article")).toHaveCount(PAGE_SIZE);
+});
+
+test("posts read on an earlier visit move from the feed to Read", async ({ page }) => {
+  await openFeed(page);
+  const first = await card(page).getAttribute("id");
+  await admin
+    .from("user_post_state")
+    .upsert({ user_id: await testUserId(), post_id: first!, read_at: "2026-01-01T00:00:00Z" }, { onConflict: "user_id,post_id" });
+  await page.reload();
+  await expect(page.locator("article")).toHaveCount(PAGE_SIZE);
+  await expect(card(page)).not.toHaveAttribute("id", first!);
+  await page.getByRole("button", { name: "Read", exact: true }).click();
+  await expect(page.locator(`article[id="${first}"]`)).toBeVisible();
 });
 
 test("scrolling to the end pages in more content and stops at the last post", async ({ page }) => {

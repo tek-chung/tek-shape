@@ -21,13 +21,18 @@ const iso = (value) => typeof value === "string" && Number.isFinite(Date.parse(v
  * an ellipsis ("A … B") passes only if every fragment appears verbatim, in order, and each is at least four
  * words — so it can bridge a cut, never stitch together words the source did not say.
  */
+// Chinese, Japanese and Korean script, which has no spaces between words.
+const CJK = /[぀-ヿ㐀-鿿가-힯豈-﫿]/g;
+/** Long enough to count as evidence: four words, or eight characters of unspaced script. */
+const substantial = (part) => (part.match(CJK)?.length ?? 0) >= 8 || part.split(" ").length >= 4;
+
 export function excerptFound(sourceText, excerpt) {
   const haystack = comparable(sourceText);
   const quote = comparable(excerpt).replace(/^["'\s]+|["'\s]+$/g, "");
   if (!quote) return false;
   if (haystack.includes(quote)) return true;
   const fragments = quote.split(/\s*(?:\.\.\.|\[\.\.\.\])\s*/).map((part) => part.trim()).filter(Boolean);
-  if (fragments.length < 2 || fragments.some((part) => part.split(" ").length < 4)) return false;
+  if (fragments.length < 2 || !fragments.every(substantial)) return false;
   let from = 0;
   for (const fragment of fragments) {
     const at = haystack.indexOf(fragment, from);
@@ -76,7 +81,11 @@ export function snapExcerpt(sourceText, excerpt, threshold = 0.85) {
   return best.score >= threshold ? words.slice(best.start, best.start + best.length).join(" ") : null;
 }
 
-export function checkDraft(draft, sources, now = Date.now()) {
+/**
+ * `evidence: false` (CONTENT_CHECKS=off) keeps only the format checks the database needs, and skips the
+ * check that every claim quotes the source. Posts are then unverified summaries with a source link.
+ */
+export function checkDraft(draft, sources, now = Date.now(), { evidence = true } = {}) {
   const errors = [];
   if (!draft || typeof draft !== "object") return ["Draft is not an object"];
   for (const [key,max] of Object.entries({ topic:60, subtopic:100, title:200, insight:400, deeper:4000 }))
@@ -88,7 +97,8 @@ export function checkDraft(draft, sources, now = Date.now()) {
   if (draft.eventDate !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(draft.eventDate) || !iso(draft.eventDate) || Date.parse(draft.eventDate) > now)) errors.push("Invalid event date");
   if (draft.contentType === "news" && (!iso(draft.articleDate) || Date.parse(draft.articleDate) > now || now - Date.parse(draft.articleDate) > 14 * 86400000
     || !sources.some((source) => source.articleDate === draft.articleDate))) errors.push("News needs a supported recent article date");
-  if (!Array.isArray(draft.claims) || !draft.claims.length || draft.claims.length > 30) errors.push("Claim evidence is required");
+  if (!evidence) { /* Claims are not checked against the source. */ }
+  else if (!Array.isArray(draft.claims) || !draft.claims.length || draft.claims.length > 30) errors.push("Claim evidence is required");
   else for (const claim of draft.claims) {
     if (!claim || typeof claim !== "object") { errors.push("Invalid claim"); continue; }
     const source = sources.find((s) => s.url === claim.url);

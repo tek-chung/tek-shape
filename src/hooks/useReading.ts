@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Cursor, Post, ReadingPosition, ReadingState } from "@/types/post";
+import type { Post, ReadingPosition, ReadingState } from "@/types/post";
 import {
   appendPosts,
   applyOutbox,
@@ -34,8 +34,11 @@ const OFFLINE_NOTICE = "Saved on this device. Your changes will sync when you’
 const LOAD_NOTICE = "Your private feed could not be refreshed. You’re reading the last copy saved on this device.";
 const COLD_NOTICE = "Your private feed could not be loaded. Check your connection and account access, then retry.";
 
-const cursorOf = (post: Post | undefined): Cursor | null =>
-  post ? { publishedAt: post.publishedAt, id: post.id } : null;
+/** Read before this moment means "already read": hidden from the feed, listed under Read. */
+const readBefore = (state: ReadingState | null, id: string, since: string) => {
+  const readAt = state?.posts[id]?.readAt;
+  return !!readAt && readAt < since;
+};
 
 /**
  * Local-first reading state and content paging.
@@ -46,9 +49,10 @@ const cursorOf = (post: Post | undefined): Cursor | null =>
  * across a reload. A refresh replays the outbox on top of the server snapshot,
  * so pulling never discards work that has not synced yet.
  *
- * Content is paged with a keyset cursor and cached alongside, so a reload
- * restores the same depth — and the same scroll position — without a network
- * round trip, and reading offline works from the cache.
+ * The feed holds what you have not read. Posts read before the app was opened
+ * (`since`) are skipped by the server and dropped from the cache; posts read in
+ * this sitting stay where they are until next time, and are listed under Read.
+ * Content is paged by queue position and cached, so reading offline works.
  */
 export function useReading(client: SupabaseClient, userId: string) {
   const [state, setState] = useState<ReadingState>(initialState);
@@ -60,6 +64,9 @@ export function useReading(client: SupabaseClient, userId: string) {
   const [atEnd, setAtEnd] = useState(false);
   const [error, setError] = useState("");
   const [restore, setRestore] = useState(0);
+  // Fixed for the life of this sitting, so posts do not vanish mid-scroll as they are read.
+  const [since] = useState(() => new Date().toISOString());
+  const exhaustedRef = useRef(false);
 
   const active = useRef(true);
   const loaded = useRef(false);
@@ -161,11 +168,10 @@ export function useReading(client: SupabaseClient, userId: string) {
       // and leave paging dead for the rest of the session.
       try {
         for (let page = 0; page < MAX_PAGES_PER_RUN && list.length < target && !exhausted; page += 1) {
-          const after = cursorOf(list.at(-1));
-          const { data, error: rpcError } = await client.rpc("reading_page", {
-            p_after_published_at: after?.publishedAt ?? null,
-            p_after_id: after?.id ?? null,
+          const { data, error: rpcError } = await client.rpc("feed_page", {
+            p_after_id: list.at(-1)?.id ?? null,
             p_limit: PAGE_SIZE,
+            p_read_before: since,
           });
           // Keep whatever is already held rather than clearing the feed on a failure.
           if (rpcError) break;
@@ -182,13 +188,14 @@ export function useReading(client: SupabaseClient, userId: string) {
           held.current = list;
           setPosts(list);
           writePosts(userId, list);
-          if (exhausted) setAtEnd(true);
+          exhaustedRef.current = exhausted;
+          setAtEnd(exhausted);
           setPaging(false);
         }
         fetching.current = false;
       }
     },
-    [client, userId],
+    [client, userId, since],
   );
 
   const refresh = useCallback(
@@ -212,16 +219,19 @@ export function useReading(client: SupabaseClient, userId: string) {
       loaded.current = true;
       setReady(true);
       setError((previous) => (previous === OFFLINE_NOTICE ? previous : ""));
-      // Catch the content up to the depth this account had reached, so the saved
-      // scroll position has something to anchor to.
-      const shallow = merged.loadedCount > held.current.length;
-      await loadUpTo(Math.max(PAGE_SIZE, merged.loadedCount));
-      // Restore again when the server was ahead of this device's cache — otherwise
-      // a position saved on another phone has nothing to scroll to on arrival.
-      if ((restorePosition || shallow) && active.current) setRestore((value) => value + 1);
+      // Drop anything another device marked read before this sitting began.
+      const kept = held.current.filter((post) => !readBefore(merged, post.id, since));
+      if (kept.length !== held.current.length) {
+        held.current = kept;
+        setPosts(kept);
+        writePosts(userId, kept);
+      }
+      // At the end of the feed, look again: the scheduler adds new posts every few hours.
+      await loadUpTo(Math.max(PAGE_SIZE, held.current.length + (exhaustedRef.current ? 1 : 0)));
+      if (restorePosition && active.current) setRestore((value) => value + 1);
       return true;
     },
-    [client, loadUpTo],
+    [client, loadUpTo, since, userId],
   );
 
   const sync = useCallback(
@@ -239,12 +249,12 @@ export function useReading(client: SupabaseClient, userId: string) {
     setPending(outboxSize(outbox.current));
 
     // Show the cached copy straight away; the network catches up behind it.
-    const cachedPosts = readPosts(userId);
+    const cached = readState(userId);
+    const cachedPosts = readPosts(userId).filter((post) => !readBefore(cached, post.id, since));
     if (cachedPosts.length) {
       held.current = cachedPosts;
       setPosts(cachedPosts);
     }
-    const cached = readState(userId);
     if (cached && cachedPosts.length) {
       loaded.current = true;
       setState(applyOutbox(cached, outbox.current, new Date().toISOString()));
@@ -270,7 +280,7 @@ export function useReading(client: SupabaseClient, userId: string) {
       document.removeEventListener("visibilitychange", resume);
       window.removeEventListener("online", online);
     };
-  }, [sync, userId]);
+  }, [sync, userId, since]);
 
   const savePost = useCallback(
     (id: string, patch: PostPatch) => {
@@ -325,7 +335,8 @@ export function useReading(client: SupabaseClient, userId: string) {
     pending,
     syncing,
     paging,
-    atEnd: atEnd || (state.total > 0 && posts.length >= state.total),
+    atEnd,
+    since,
     error,
     restore,
     savePost,

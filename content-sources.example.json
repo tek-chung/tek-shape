@@ -1,20 +1,78 @@
 [
+  { "publisher": "Quanta Magazine", "hosts": ["www.quantamagazine.org"], "feeds": ["https://www.quantamagazine.org/feed/"] },
+  { "publisher": "Aeon", "hosts": ["aeon.co"], "feeds": ["https://aeon.co/feed.rss"] },
+  { "publisher": "NASA", "hosts": ["www.nasa.gov", "science.nasa.gov"], "feeds": ["https://www.nasa.gov/feed/"] },
   {
-    "publisher": "Quanta Magazine",
-    "hosts": ["www.quantamagazine.org"],
-    "feeds": ["https://www.quantamagazine.org/feed/"],
-    "articles": []
+    "publisher": "The Guardian",
+    "hosts": ["www.theguardian.com"],
+    "feeds": ["https://www.theguardian.com/world/rss", "https://www.theguardian.com/science/rss", "https://www.theguardian.com/technology/rss"],
+    "skip": "/live/|/video/|/gallery/"
+  },
+  { "publisher": "CNN", "hosts": ["lite.cnn.com"], "pages": ["https://lite.cnn.com/"], "match": "/20\\d{2}/\\d{2}/\\d{2}/" },
+  { "publisher": "Al Jazeera", "hosts": ["www.aljazeera.com"], "feeds": ["https://www.aljazeera.com/xml/rss/all.xml"], "skip": "/video/|/liveblog/|/gallery/" },
+  { "publisher": "South China Morning Post", "hosts": ["www.scmp.com"], "feeds": ["https://www.scmp.com/rss/2/feed", "https://www.scmp.com/rss/4/feed"] },
+  { "publisher": "China Review News (中評社)", "hosts": ["hk.crntt.com"], "pages": ["https://hk.crntt.com/"], "match": "/doc/" },
+  { "publisher": "Nature", "hosts": ["www.nature.com"], "feeds": ["https://www.nature.com/nature.rss"], "match": "/articles/d41586-" },
+  { "publisher": "Physics World", "hosts": ["physicsworld.com"], "feeds": ["https://physicsworld.com/feed/"] },
+  { "publisher": "engineering.com", "hosts": ["www.engineering.com"], "feeds": ["https://www.engineering.com/feed/"] },
+  { "publisher": "TechCrunch", "hosts": ["techcrunch.com"], "feeds": ["https://techcrunch.com/feed/"] },
+  { "publisher": "The Learning Scientists", "hosts": ["www.learningscientists.org"], "feeds": ["https://www.learningscientists.org/blog?format=rss"], "skip": "weekly-digest" },
+  {
+    "publisher": "NASA Space Place",
+    "hosts": ["spaceplace.nasa.gov"],
+    "pages": ["https://spaceplace.nasa.gov/", "https://spaceplace.nasa.gov/menu/earth/", "https://spaceplace.nasa.gov/menu/sun/", "https://spaceplace.nasa.gov/menu/solar-system/", "https://spaceplace.nasa.gov/menu/space/", "https://spaceplace.nasa.gov/menu/science-and-technology/"],
+    "match": "^https://spaceplace\\.nasa\\.gov/[a-z0-9-]+/en/$",
+    "skip": "game|art-challenge|glossary|image-use|coloring|craft"
+  },
+  { "publisher": "ScienceDaily", "hosts": ["www.sciencedaily.com"], "feeds": ["https://www.sciencedaily.com/rss/all.xml"] },
+  { "publisher": "The Marginalian", "hosts": ["www.themarginalian.org"], "feeds": ["https://www.themarginalian.org/feed/"] },
+  {
+    "publisher": "etnet 雷鳴天下 (Francis Lui)",
+    "hosts": ["www.etnet.com.hk"],
+    "pages": ["https://www.etnet.com.hk/www/tc/lifestyle/internationalaffairs/francislui"],
+    "match": "/www/tc/lifestyle/\\d{5,}/.*entry=cat"
   },
   {
-    "publisher": "Aeon",
-    "hosts": ["aeon.co"],
-    "feeds": ["https://aeon.co/feed.rss"],
-    "articles": []
+    "publisher": "Stanford Encyclopedia of Philosophy",
+    "hosts": ["plato.stanford.edu"],
+    "pages": ["https://plato.stanford.edu/new.html", "https://plato.stanford.edu/contents.html"],
+    "match": "^https://plato\\.stanford\\.edu/entries/[A-Za-z0-9-]+/$"
+  },
+  { "publisher": "Tiny Buddha", "hosts": ["tinybuddha.com"], "feeds": ["https://tinybuddha.com/feed/"], "match": "tinybuddha\\.com/blog/" },
+  {
+    "publisher": "Psychology Today",
+    "hosts": ["www.psychologytoday.com"],
+    "pages": ["https://www.psychologytoday.com/gb/essentials", "https://www.psychologytoday.com/gb/essentials?page=2"],
+    "match": "^https://www\\.psychologytoday\\.com/gb/blog/[a-z0-9-]+/\\d{6}/[a-z0-9-]+$"
   },
   {
-    "publisher": "NASA",
-    "hosts": ["www.nasa.gov", "science.nasa.gov"],
-    "feeds": ["https://www.nasa.gov/feed/"],
-    "articles": []
-  }
+    "publisher": "Think Fast Talk Smart",
+    "hosts": ["www.fastersmarter.io"],
+    "pages": ["https://www.fastersmarter.io/", "https://www.fastersmarter.io/episodes/"],
+    "match": "^https://www\\.fastersmarter\\.io/\\d+-[a-z0-9-]+/$"
+  },
+  {
+    "publisher": "Investopedia",
+    "hosts": ["www.investopedia.com"],
+    "feeds": ["https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_headline", "https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_articles"],
+    "pages": ["https://www.investopedia.com/", "https://www.investopedia.com/financial-term-dictionary-4769738"],
+    "match": "^https://www\\.investopedia\\.com/(terms/[a-z0-9]/[a-z0-9-]+\\.asp|[a-z0-9-]+-\\d{7,}|[a-z0-9-]+\\.asp)$",
+    "skip": "about-us|contact|newsletter|sitemap|legal|privacy|terms-of-use|financial-term-dictionary|terms-beginning-with"
+  },
+  {
+    "publisher": "MIT Sloan Management Review",
+    "hosts": ["sloanreview.mit.edu"],
+    "feeds": ["https://sloanreview.mit.edu/feed/"],
+    "pages": ["https://sloanreview.mit.edu/", "https://sloanreview.mit.edu/topic/leadership/", "https://sloanreview.mit.edu/topic/strategy/", "https://sloanreview.mit.edu/topic/ai-machine-learning/"],
+    "match": "^https://sloanreview\\.mit\\.edu/article/[a-z0-9-]+/?$"
+  },
+  {
+    "publisher": "The Conversation",
+    "hosts": ["theconversation.com"],
+    "feeds": ["https://theconversation.com/uk/articles.atom"],
+    "pages": ["https://theconversation.com/uk"],
+    "match": "^https://theconversation\\.com/[a-z0-9-]+-\\d{5,}$"
+  },
+  { "publisher": "Knowledge at Wharton", "hosts": ["knowledge.wharton.upenn.edu"], "feeds": ["https://knowledge.wharton.upenn.edu/feed/"], "match": "/article/|/podcast/" },
+  { "publisher": "Hacker News", "hosts": ["news.ycombinator.com"], "feeds": ["https://news.ycombinator.com/rss"], "openHosts": true }
 ]

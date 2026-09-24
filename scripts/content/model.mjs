@@ -16,10 +16,12 @@ export const draftSchema = object({
   claims:array(object({ claim:string, sentences:array({ type:"integer" }) })),
 });
 export const reviewSchema = object({ supported:{type:"boolean"}, complete:{type:"boolean"}, misleading:{type:"boolean"},
+  // A few words on what failed, so a held draft can be understood without re-running the review.
+  problems:string,
   claims:array(object({ index:{type:"integer"}, supported:{type:"boolean"}, reason:string })) });
 
 /** Primary first, then fallbacks. Override with CONTENT_PROVIDERS. */
-export const DEFAULT_CHAIN = "mistral,openrouter";
+export const DEFAULT_CHAIN = "gemini,mistral,openrouter";
 const MAX_INPUT_BYTES = 180_000;
 
 function number(value, name, { min = 0, max = Infinity, integer = false } = {}) {

@@ -25,7 +25,7 @@ Settled — do not relitigate:
 | Feed volume | **Twitter-like** — continuous, many posts a day, shaped by ratings. |
 | Content origin | **Aggregate, don't invent.** Summarise real articles from trusted feeds; every claim must quote its source. |
 | AI cost | **Free tiers only.** No paid API credit. `CONTENT_DAILY_USD` defaults to 0. |
-| AI provider | **Mistral primary, OpenRouter fallback** (final, after Groq's console proved unreachable from the owner's network). Groq and Gemini remain available by config. |
+| AI provider | **Gemini 3.5 Flash-Lite primary, then Mistral, then OpenRouter** (owner confirmed a Gemini free tier on their AI Studio account: 15 RPM, 250K TPM, 500 RPD). Groq remains available by config. |
 | Model churn | Model settings are **ordered preference lists**; retired models are skipped automatically. |
 | Scheduling | **GitHub Actions**, so the laptop can be off. |
 | Migration style | Phase 3 migration edited in place; Phase 4 migrations are **additive**. |
@@ -191,6 +191,89 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
   the mounted filesystem, not the code.
 - Existing traps still apply: singleton auth client; public env vars inlined at build time; `@next/env`
   needs a default import; never disable controls to await sync.
+
+## 5b. Source links and more feeds (23 Sep 2026)
+
+- `PostCard` shows "Read the original · publisher: title" on every post, plus the publication date.
+- Sources: 14 groups in `content-sources.example.json` (see docs/content-engine.md for options).
+  CNN added 24 Sep via its text-only site (`pages` lite.cnn.com, match dated paths). Reuters excluded (no public RSS; blocks automated readers). FT and The Economist removed 24 Sep: hard
+  paywalls, their RSS carries only headlines and standfirsts.
+- Engine: listing-page discovery (`pages` + `match`), `skip`, `openHosts`, round-robin across publishers,
+  charset decoding (Big5/GBK), CJK sentence splitting and excerpts, paywall guard, 800-character minimum.
+- Tests: 75 content tests pass (new `tests/content/sources.test.mjs`); tsc passes.
+
+## 5c. Gemini primary (23 Sep 2026)
+
+- Chain is now `gemini,mistral,openrouter`; `CONTENT_GEMINI_MODEL=gemini-3.5-flash-lite,gemini-flash-lite-latest`,
+  4.5 s spacing, 450 calls a day (free tier: 15 RPM, 250K TPM, 500 RPD). Mistral and OpenRouter are fallbacks.
+- Gemini adapter gained `listModels`, so `npm run content -- models` confirms the ID. First live Gemini call
+  is the real test of the Interactions API adapter.
+
+## 5d. Extraction and concept fixes (24 Sep 2026)
+
+- Al Jazeera draft held: cheerio ran blocks together with no space, so the whole page was "sentence 1" and
+  every excerpt exceeded 2,400 chars. Extraction now prefers `<p>` text, drops figures/buttons/aria-hidden,
+  spaces blocks; the splitter also breaks run-together sentences over 500 chars.
+- Gemini Flash-Lite copied the prompt's example slug and the recent-concepts list as tags. Prompt reworded;
+  `relevantConcepts` drops tags with no word in the article (skipped for non-Latin sources).
+- `[1]`-style markers stripped from prose. `review <publisher>` finds the latest draft by name and prints the URL.
+
+## 5e. Checks switch (24 Sep 2026)
+
+- Owner chose `CONTENT_CHECKS=off` locally after a run of false holds. Off = format checks only, no quote
+  check, no review call; candidates record `checks.mode`, and publish notes say claims are unverified.
+  CI default stays `strict` unless the `CONTENT_CHECKS` variable is set. Posts still show as
+  `source_checked` in the database (schema allows only that or `unreviewed`); the note records the truth.
+- The 7 "Invalid canonical concepts" holds were caused by my relevance filter leaving no tags (and Chinese
+  tags slugging to nothing). Tags now fall back to subtopic/topic, so they never hold a post.
+- Redirects may move between hosts of the same site (SCMP, Nature); feed size limit 1 MB → 5 MB (Physics World).
+
+## 5f. Unread feed and Read list (24 Sep 2026)
+
+- Migration `202609250001_unread_feed.sql` (additive): `post_json`, `feed_page(p_after_id, p_limit,
+  p_read_before)` skipping posts read before the app opened, `saved_page('bookmarked'|'read', offset, limit)`.
+  `reading_page` kept for old clients. SQL tests: `tests/sql/unread-feed.test.mjs`.
+- Client: `useReading` pages `feed_page` with `since` = app-open time and drops read-before-since posts from
+  the cache; at the end of the feed each poll looks for new posts. New `useList` hook; Feed has
+  Your feed / Library / Read tabs, Library count from all bookmarks, lists fetched from the server.
+- Playwright: `beforeEach` clears `read_at` for the test user; new "moves to Read" test. Not yet run.
+
+## 5g. Seeded-post sources (24 Sep 2026)
+
+- Added The Learning Scientists (RSS), NASA Space Place (listing pages), Open Music Theory (Pressbooks
+  contents page). Listing pages now yield up to 200 links, so later chapters are reached on later runs.
+- Not added: OpenStax (its pages say the books may not be ingested by LLMs/generative AI without
+  permission), Khan Academy (content is rendered by JavaScript; the fetcher sees an empty page),
+  NPS and Cornell (single pages with no feed or listing).
+
+## 5h. More sources (24 Sep 2026)
+
+- Removed Open Music Theory (owner not interested). Added ScienceDaily, The Marginalian, Tiny Buddha (RSS),
+  etnet 雷鳴天下 by Francis Lui (listing page; Chinese), Stanford Encyclopedia of Philosophy (What's New +
+  full contents; chosen over IEP for its update stream and depth). Now 20 groups: the validator's maximum.
+- Listing pages yield up to 2,000 links, so SEP's contents are worked through over many runs.
+  `CONTENT_DRAFT_LIMIT` 20 locally and as the CI default.
+
+## 5i. Psychology Today; two refused (24 Sep 2026)
+
+- Added Psychology Today (Essential Reads pages 1–2, blog-post links). Source cap raised 20 → 30.
+- Not added: FT Alphaville (needs an FT account; the engine never signs in), CFO Secrets (its footer says
+  content "may not be used, reproduced, or scraped without express permission", incl. for AI).
+
+- Added Think Fast Talk Smart (podcast; episode pages carry full transcripts). 22 groups.
+
+- Added Investopedia (feed URL unverified: my fetch tool is blocked there) and MIT Sloan Management Review
+  (feed returned nothing to my tool; articles may be registration-walled). 24 groups; `check` decides.
+
+- Added The Conversation UK (Atom feed + homepage; the feed returned nothing to my tool) and Knowledge at
+  Wharton (RSS verified; protected special reports skipped). 26 groups.
+
+- Nature fix: its feed is RSS 1.0 (RDF), whose items sit under `rdf:RDF`, not `rss.channel`; `discoverXML`
+  read none. Now handled (19 of Nature's first 20 items are `d41586-` news). Test added; 85 content tests pass.
+
+- Investopedia and MIT SMR now have several discovery routes each (feeds + homepage/dictionary/topic pages).
+  Paywall guard only rejects pages under 3,000 chars, so an upsell box after a full article no longer
+  rejects it. No bot-block or paywall circumvention (no browser spoofing, no archive mirrors).
 
 ## 6. Next steps
 

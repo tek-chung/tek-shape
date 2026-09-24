@@ -4,9 +4,9 @@ name: Content engine
 # (if CONTENT_AUTO_PUBLISH is on), and tops up your reading queue.
 #
 # Does nothing until secrets are added: Settings -> Secrets and variables -> Actions.
-#   Secrets:   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, MISTRAL_API_KEY, OPENROUTER_API_KEY
+#   Secrets:   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GEMINI_API_KEY, MISTRAL_API_KEY, OPENROUTER_API_KEY
 #   Optional:  CONTENT_SOURCES_JSON (secret, to keep your feed list private)
-#   Variables: CONTENT_AUTO_PUBLISH, CONTENT_MISTRAL_MODEL, CONTENT_OPENROUTER_MODEL, CONTENT_DRAFT_LIMIT
+#   Variables: CONTENT_AUTO_PUBLISH, CONTENT_GEMINI_MODEL, CONTENT_MISTRAL_MODEL, CONTENT_OPENROUTER_MODEL, CONTENT_DRAFT_LIMIT
 #
 # This repository is public, so its logs are too. The runner prints only counts
 # and status codes, never source text, drafts or keys.
@@ -31,16 +31,21 @@ jobs:
     env:
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       CONTENT_SOURCES_JSON: ${{ secrets.CONTENT_SOURCES_JSON }}
-      CONTENT_PROVIDERS: ${{ vars.CONTENT_PROVIDERS || 'mistral,openrouter' }}
-      CONTENT_MISTRAL_MODEL: ${{ vars.CONTENT_MISTRAL_MODEL || 'ministral-14b-latest,ministral-8b-latest,mistral-medium-latest' }}
+      CONTENT_PROVIDERS: ${{ vars.CONTENT_PROVIDERS || 'gemini,mistral,openrouter' }}
+      CONTENT_GEMINI_MODEL: ${{ vars.CONTENT_GEMINI_MODEL || 'gemini-3.5-flash-lite,gemini-flash-lite-latest' }}
+      CONTENT_GEMINI_MIN_INTERVAL_MS: "4500"
+      CONTENT_GEMINI_DAILY_CALLS: "450"
+      CONTENT_MISTRAL_MODEL: ${{ vars.CONTENT_MISTRAL_MODEL || 'ministral-14b-latest,ministral-8b-latest' }}
       # Free OpenRouter models change often; run `npm run content -- models` and update this variable when one retires.
       CONTENT_OPENROUTER_MODEL: ${{ vars.CONTENT_OPENROUTER_MODEL || 'qwen/qwen3.8-27b:free,nex-agi/nex-n2.5-pro:free' }}
       CONTENT_OPENROUTER_DAILY_CALLS: "50"
+      CONTENT_CHECKS: ${{ vars.CONTENT_CHECKS || 'strict' }}
       CONTENT_AUTO_PUBLISH: ${{ vars.CONTENT_AUTO_PUBLISH || 'false' }}
-      CONTENT_DRAFT_LIMIT: ${{ vars.CONTENT_DRAFT_LIMIT || '8' }}
+      CONTENT_DRAFT_LIMIT: ${{ vars.CONTENT_DRAFT_LIMIT || '26' }}
       CONTENT_QUEUE_TARGET: ${{ vars.CONTENT_QUEUE_TARGET || '24' }}
       CONTENT_DAILY_USD: "0"
     steps:

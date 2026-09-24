@@ -1,4 +1,4 @@
-import { ProviderError, parseModelJSON, postJSON } from "./shared.mjs";
+import { ProviderError, getJSON, parseModelJSON, postJSON } from "./shared.mjs";
 
 /**
  * Google Gemini, via the Interactions API.
@@ -37,5 +37,15 @@ export const gemini = {
       json: parseModelJSON(text),
       usage: { input: result.usage?.total_input_tokens ?? 0, output: result.usage?.total_output_tokens ?? 0 },
     };
+  },
+
+  /** Text-generation models this key can use, as bare IDs (e.g. "gemini-3.5-flash-lite"). */
+  async listModels({ key, fetchImpl = fetch }) {
+    const result = await getJSON(fetchImpl, "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", { "x-goog-api-key": key });
+    return (result?.models ?? [])
+      .filter((model) => (model?.supportedGenerationMethods ?? []).includes("generateContent"))
+      .map((model) => String(model?.name ?? "").replace(/^models\//, ""))
+      .filter((id) => id.startsWith("gemini"))
+      .sort();
   },
 };

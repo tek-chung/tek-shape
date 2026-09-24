@@ -3,12 +3,15 @@ import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowDown, Bookmark, Layers2, LockKeyhole, Sprout } from "lucide-react";
+import { ArrowDown, Bookmark, CheckCheck, Layers2, LockKeyhole, Sprout } from "lucide-react";
 import { emptyPost, type PostPatch } from "@/lib/storage";
 import type { ReadingPosition } from "@/types/post";
 import { useReading } from "@/hooks/useReading";
+import { useList } from "@/hooks/useList";
 import { PostCard } from "./PostCard";
 import { ratingLabels } from "./FeedbackBar";
+
+type View = "feed" | "library" | "read";
 
 export function Feed({
   client,
@@ -21,7 +24,9 @@ export function Feed({
 }) {
   const { state, posts, ready, pending, syncing, paging, atEnd, error, restore, savePost, saveProgress, loadMore, retry } =
     useReading(client, userId);
-  const [view, setView] = useState<"feed" | "library">("feed");
+  const [view, setView] = useState<View>("feed");
+  const library = useList(client, "bookmarked", view === "library", posts.filter((post) => state.posts[post.id]?.bookmarked));
+  const readList = useList(client, "read", view === "read", posts.filter((post) => state.posts[post.id]?.readAt));
   const [announcement, setAnnouncement] = useState("");
   const current = useRef({ state, saveProgress, savePost, loadMore });
   useEffect(() => {
@@ -29,7 +34,6 @@ export function Feed({
   });
   const position = useRef<ReadingPosition | null>(null);
   const sentinel = useRef<HTMLDivElement | null>(null);
-  const total = state.total || posts.length;
 
   useEffect(() => {
     if (!ready || view !== "feed") return;
@@ -134,7 +138,7 @@ export function Feed({
     else if (patch.bookmarked !== undefined)
       setAnnouncement(patch.bookmarked ? "Saved to your Library." : "Removed from your Library.");
   }
-  function switchView(next: "feed" | "library") {
+  function switchView(next: View) {
     if (next === view) return;
     setView(next);
     window.scrollTo(0, 0);
@@ -153,8 +157,10 @@ export function Feed({
       </main>
     );
 
-  const saved = posts.filter((post) => state.posts[post.id]?.bookmarked);
-  const shown = view === "feed" ? posts : saved;
+  const savedCount = Object.values(state.posts).filter((post) => post.bookmarked).length;
+  const list = view === "library" ? library : view === "read" ? readList : null;
+  const shown = list ? list.items : posts;
+  const unread = posts.filter((post) => !state.posts[post.id]?.readAt).length;
   const status = syncing ? "Syncing…" : pending ? "Saved on this device" : "Saved to your account";
 
   return (
@@ -206,14 +212,16 @@ export function Feed({
             onClick={() => switchView("library")}
           >
             <Bookmark size={17} aria-hidden="true" />
-            Library<span className="count">{saved.length}</span>
+            Library<span className="count">{savedCount}</span>
+          </button>
+          <button type="button" aria-current={view === "read" ? "page" : undefined} onClick={() => switchView("read")}>
+            <CheckCheck size={17} aria-hidden="true" />
+            Read
           </button>
         </nav>
         <div className="feed-heading">
-          <h2>{view === "feed" ? "Explore something different" : "Keep good ideas close"}</h2>
-          <span>
-            {shown.length} {view === "feed" ? `of ${total}` : "saved"}
-          </span>
+          <h2>{view === "feed" ? "Explore something different" : view === "library" ? "Keep good ideas close" : "Already read"}</h2>
+          <span>{view === "feed" ? `${unread} unread` : view === "library" ? `${savedCount} saved` : "newest first"}</span>
         </div>
         <p className="sample-note">
           Posts marked SAMPLE are illustrative, not verified editorial content. Published posts include their sources.
@@ -225,6 +233,7 @@ export function Feed({
             difficulty. Bookmark: save independently. Book: open or close the deeper explanation.
           </p>
           <p>
+            Posts you have read move to Read the next time you open T, so your feed starts at something new.
             Choose one rating per post; tap it again to clear. Preferences sync privately across your devices and guide
             future queue preparation. Posts already in your queue keep their order.
           </p>
@@ -245,14 +254,33 @@ export function Feed({
             <PostCard
               key={post.id}
               post={post}
-              index={view === "feed" ? index : posts.indexOf(post)}
+              index={index}
               state={state.posts[post.id] ?? emptyPost}
               disabled={!ready}
               onChange={(patch) => updatePost(post.id, patch)}
             />
           ))}
         </div>
-        {view === "library" && saved.length === 0 && (
+        {list?.offline && (
+          <p role="status" className="storage-warning">
+            Offline: showing only what this device already holds.
+          </p>
+        )}
+        {list && !list.atEnd && shown.length > 0 && (
+          <div className="continue">
+            <button className="load-button" onClick={list.more} disabled={list.loading}>
+              {list.loading ? "Loading…" : "Show more"}
+            </button>
+          </div>
+        )}
+        {view === "read" && !readList.loading && shown.length === 0 && (
+          <div className="empty-state">
+            <CheckCheck size={28} aria-hidden="true" />
+            <h3>Nothing read yet.</h3>
+            <p>Posts you read appear here, newest first.</p>
+          </div>
+        )}
+        {view === "library" && !library.loading && shown.length === 0 && (
           <div className="empty-state">
             <Bookmark size={28} aria-hidden="true" />
             <h3>Your next good idea belongs here.</h3>
@@ -274,7 +302,7 @@ export function Feed({
               <div className="end-note">
                 <Sprout size={23} aria-hidden="true" />
                 <p>A good place to pause.</p>
-                <span>You’ve reached all {total} ideas. Come back to one that stayed with you.</span>
+                <span>You’re all caught up. New posts arrive every few hours; past ones are under Read.</span>
               </div>
             ) : (
               <div className="continue">

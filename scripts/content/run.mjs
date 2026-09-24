@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
 import nextEnv from "@next/env";
-import { DRAFT_INSTRUCTION, draftCandidates, modelSource, prepareQueue, settleDraft, validateSources } from "./engine.mjs";
-import { discoverXML, fetchSource } from "./sources.mjs";
+import { DRAFT_INSTRUCTION, discover, draftCandidates, modelSource, prepareQueue, publisherOf, settleDraft, validateSources } from "./engine.mjs";
+import { extractArticle, fetchSource } from "./sources.mjs";
 import { draftSchema, generateJSON, liveModels, modelConfig } from "./model.mjs";
 import { checkDraft, checkReview, excerptFound, recentConcepts, summarisePreferences } from "./editorial.mjs";
 
@@ -18,7 +18,8 @@ if (command === "help" || !COMMANDS.includes(command)) {
   draft              draft new candidates from the configured sources
   publish-checked    publish every candidate that passed its checks
   publish <id> <note>  publish one checked candidate with a review note
-  review [id]        read a draft, with each quote marked found or not (default: latest held)
+  review [id|name]   read a draft, with each quote marked found or not (default: latest held;
+                     a name such as "al jazeera" picks the latest draft from that publisher)
   prepare            append published posts to the reading queue
   status             candidate counts, queue depth, today's per-provider usage
   providers          show the configured provider chain (never prints keys)
@@ -87,6 +88,7 @@ async function draft(config) {
     limit: setting("CONTENT_DRAFT_LIMIT", 8, { min: 1, max: 50 }),
     sourceChars: setting("CONTENT_SOURCE_CHARS", 10000, { min: 2000, max: 24000 }),
     known: new Set(done.map((row) => row.url).filter(Boolean)),
+    checks: checksMode(),
     // stderr, so the JSON summary on stdout stays clean for anything that parses it.
     onProgress: ({ n, limit, publisher, outcome }) => console.error(`[${n}/${limit}] ${publisher}: ${outcome}`),
     generate: (args) => generateJSON({
@@ -104,8 +106,12 @@ async function draft(config) {
 
 /** Re-run every check before publishing, so nothing is published on a stale verdict. */
 function passesChecks(candidate) {
+  // A draft made with checks off is judged by the same rule it was made under: format only, no review.
+  if (candidate.checks?.mode === "off") return !checkDraft(candidate.payload, candidate.evidence, Date.now(), { evidence: false }).length;
   return !checkDraft(candidate.payload, candidate.evidence).length && checkReview(candidate.checks?.review, candidate.payload);
 }
+/** CONTENT_CHECKS=off skips the quote check and the AI review. Anything else means strict. */
+const checksMode = () => (/^off$/i.test(process.env.CONTENT_CHECKS ?? "") ? "off" : "strict");
 
 async function publishChecked() {
   const candidates = await result(db.from("content_candidate").select("id,payload,evidence,checks").eq("status", "checked").limit(200));
@@ -116,7 +122,9 @@ async function publishChecked() {
     try {
       await result(db.rpc("publish_candidate", {
         p_id: candidate.id,
-        p_note: `Auto-published: passed source-excerpt checks and model review (${models.join(", ") || "model unrecorded"}).`,
+        p_note: candidate.checks?.mode === "off"
+          ? `Auto-published with checks off: claims not verified against the source (${models.join(", ") || "model unrecorded"}).`
+          : `Auto-published: passed source-excerpt checks and model review (${models.join(", ") || "model unrecorded"}).`,
       }));
       metrics.published++;
     } catch {
@@ -207,13 +215,20 @@ async function check() {
   let groups = null;
   await attempt("Sources", async () => { groups = validateSources(await loadSources()); return `${groups.length} publishers`; });
   for (const group of groups ?? []) {
-    for (const feed of group.feeds) {
-      await attempt(`Feed: ${group.publisher}`, async () => {
-        const found = discoverXML((await fetchSource(feed, group.hosts)).text, group.hosts);
-        if (!found.length) throw new Error("reachable, but listed no articles on the allowed hosts");
-        return `${found.length} articles`;
-      }, "check the feed URL and its hosts list");
-    }
+    // Discovery, then one real article: a feed can list plenty yet every page be paywalled or blocked.
+    await attempt(`Source: ${group.publisher}`, async () => {
+      const feedReasons = [];
+      const { urls, linkHosts } = await discover(group, fetchSource, (why) => { feedReasons.push(why); });
+      if (!urls.length) throw new Error(feedReasons.length ? `feed or page unreachable (${[...new Set(feedReasons)].join("; ")})` : "reachable, but listed no articles on the allowed hosts");
+      const reasons = [];
+      for (const url of urls.slice(0, 3)) {
+        try {
+          const article = extractArticle(await fetchSource(url, linkHosts), publisherOf(group, url));
+          return `${urls.length} articles; sample readable (${article.text.length.toLocaleString()} characters)`;
+        } catch (error) { reasons.push(error.message); }
+      }
+      throw new Error(`${urls.length} articles listed, but none of the first ${Math.min(3, urls.length)} could be read: ${[...new Set(reasons)].join("; ")}`);
+    }, "posts from this source will be skipped; remove it or adjust its match/skip patterns");
   }
 
   for (const { ok, label, detail, warning } of results) console.log(`${!ok ? "✗" : warning ? "!" : "✓"} ${label}${detail ? `: ${detail}` : ""}`);
@@ -294,23 +309,37 @@ async function main() {
 
   if (command === "review") {
     // With no id, the most recent held draft: the one you most likely want to understand.
-    const candidate = id
-      ? await result(db.from("content_candidate").select("*").eq("id", id).single())
-      : (await result(db.from("content_candidate").select("*").eq("status", "held").order("created_at", { ascending: false }).limit(1)))[0];
-    if (!candidate) { console.log("No held drafts."); return; }
+    // An id ("idea-…") picks one draft; any other word picks the latest draft from a matching publisher or
+    // URL, e.g. `review "al jazeera"`.
+    let candidate;
+    if (id?.startsWith("idea-")) candidate = await result(db.from("content_candidate").select("*").eq("id", id).single());
+    else {
+      const recent = await result(db.from("content_candidate").select("*").order("created_at", { ascending: false }).limit(200));
+      const word = id?.toLowerCase();
+      candidate = word
+        ? recent.find((c) => `${c.evidence?.[0]?.publisher ?? ""} ${c.evidence?.[0]?.url ?? ""}`.toLowerCase().includes(word))
+        : recent.find((c) => c.status === "held");
+    }
+    if (!candidate) { console.log(id ? `No recent draft matches "${id}".` : "No held drafts."); return; }
     const p = candidate.payload ?? {};
     const text = candidate.evidence?.[0]?.text ?? "";
     // Local terminal only: this prints the draft and quotes, which never go to CI logs.
     console.log(`${candidate.id} — ${candidate.status}\n${p.title ?? "(no title)"}  [${p.topic ?? "?"} / ${p.subtopic ?? "?"}]`);
-    console.log(`source: ${candidate.evidence?.[0]?.publisher ?? "?"}: ${candidate.evidence?.[0]?.title ?? "?"}\n`);
+    console.log(`source: ${candidate.evidence?.[0]?.publisher ?? "?"}: ${candidate.evidence?.[0]?.title ?? "?"}\n        ${candidate.evidence?.[0]?.url ?? ""}\n`);
     for (const [i, paragraph] of (p.explanation ?? []).entries()) console.log(`${i ? "" : "Explanation:\n"}  ${paragraph}`);
     if (p.insight) console.log(`\nInsight: ${p.insight}`);
+    if (p.deeper) console.log(`\nDeeper: ${p.deeper}`);
     console.log(`Concepts: ${(p.conceptIds ?? []).join(", ") || "(none)"}\n\nClaims:`);
     for (const [i, claim] of (p.claims ?? []).entries()) {
       console.log(`  ${excerptFound(text, claim?.excerpt ?? "") ? "✓" : "✗"} ${i + 1}. ${claim?.claim}\n       quote: "${claim?.excerpt}"`);
     }
     console.log(`\nChecks: ${candidate.checks?.passed ? "passed" : (candidate.checks?.errors ?? []).join("; ") || "none recorded"}`);
-    if (candidate.checks?.review) console.log(`Reviewer: supported=${candidate.checks.review.supported} complete=${candidate.checks.review.complete} misleading=${candidate.checks.review.misleading}`);
+    const verdict = candidate.checks?.review;
+    if (verdict) {
+      console.log(`Reviewer: supported=${verdict.supported} complete=${verdict.complete} misleading=${verdict.misleading}`);
+      if (verdict.problems) console.log(`  problems: ${verdict.problems}`);
+      for (const c of verdict.claims ?? []) if (!c?.supported) console.log(`  claim ${Number(c?.index) + 1} rejected: ${c?.reason}`);
+    }
     console.log(`Models: ${(candidate.checks?.models ?? []).map((m) => `${m.provider}/${m.model}${m.ok ? "" : ` (${m.reason})`}`).join(", ") || "unrecorded"}`);
   } else if (command === "publish") {
     const candidate = await result(db.from("content_candidate").select("*").eq("id", id ?? "").single());

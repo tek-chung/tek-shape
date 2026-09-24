@@ -29,6 +29,7 @@ h1 em { color: #597057; font-weight: 400; }
 .view-nav { display: flex; border-bottom: 1px solid var(--line); gap: 24px; }
 .view-nav button { display: flex; align-items: center; gap: 8px; min-height: 49px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--muted); font-size: 13px; }
 .view-nav button[aria-current] { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+@media (max-width: 380px) { .view-nav { gap: 14px; } }
 .count { border-radius: 5px; background: #e6ebdf; font-size: 10px; padding: 2px 5px; }
 .feed-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 27px 0 10px; }
 .feed-heading h2 { font-size: 13px; font-weight: 600; margin: 0; }

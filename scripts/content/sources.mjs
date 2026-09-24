@@ -8,12 +8,39 @@ import { XMLParser } from "fast-xml-parser";
 export const digest = (value) => createHash("sha256").update(value).digest("hex");
 export const normalise = (value) => value.replace(/\s+/g, " ").trim();
 
+/**
+ * `hosts` lists the hostnames a source may be fetched from. The single entry "*" means any host — used only
+ * for the articles a link aggregator (Hacker News) points to. Everything else still applies to it: HTTPS on
+ * 443, no credentials, no IP literals, and fetchSource refuses any name that resolves to a private address.
+ */
+export const ANY_HOST = ["*"];
+
 export function safeURL(input, hosts) {
   const url = new URL(input);
+  const allowed = hosts.includes("*") || hosts.includes(url.hostname);
   if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443")
-    || isIP(url.hostname) || !hosts.includes(url.hostname)) throw new Error("Source URL is outside the approved HTTPS hosts");
+    || isIP(url.hostname) || !allowed) throw new Error(`Source URL is outside the approved HTTPS hosts (${url.protocol}//${url.hostname})`);
   url.hash = "";
   return url;
+}
+
+/** Find the declared character set: HTTP header first, then an XML declaration or HTML meta tag. */
+function charsetOf(headers, bytes) {
+  const header = /charset=["']?([\w-]+)/i.exec(headers["content-type"] ?? "")?.[1];
+  if (header) return header;
+  const head = bytes.subarray(0, 4096).toString("latin1");
+  return /<\?xml[^>]+encoding=["']([\w-]+)/i.exec(head)?.[1]
+    ?? /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1]
+    ?? "utf-8";
+}
+
+/** Decode in the page's own character set (Big5 and GBK are common on Chinese sites), falling back to UTF-8. */
+export function decode(bytes, headers = {}) {
+  try {
+    return new TextDecoder(charsetOf(headers, bytes)).decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
 }
 // IPv4 ranges that are not the public internet (IANA special-purpose registry), each at its exact size.
 // The earlier byte checks blocked whole /16s where only a /24 is reserved — 192.0.x.x among them, which
@@ -48,6 +75,34 @@ export function publicIPv4(address) {
   return !RANGES.some(({ network, mask }) => ((value & mask) >>> 0) === network);
 }
 
+/** Base domain, roughly: "www.scmp.com" → "scmp.com". Good enough for same-site redirects. */
+const site = (host) => host.replace(/^www\./, "");
+/**
+ * A redirect may move between hosts of the same site (www.scmp.com → scmp.com, www.nature.com →
+ * feeds.nature.com). Everything else about it is still checked: HTTPS, no IP literal, a public address.
+ */
+function withSameSite(hosts, location, from) {
+  if (hosts.includes("*")) return hosts;
+  try {
+    const target = new URL(location, from).hostname;
+    return hosts.some((h) => target === site(h) || target.endsWith(`.${site(h)}`)) ? [...hosts, target] : hosts;
+  } catch { return hosts; }
+}
+
+/**
+ * Where a redirect leads. Some sites (SCMP) redirect to plain http://, which is never fetched: ask for the
+ * same address over HTTPS instead. If that is exactly where we already are, the site insists on HTTP.
+ */
+export function nextHop(location, from) {
+  const next = new URL(location, from);
+  if (next.protocol === "http:") {
+    next.protocol = "https:";
+    if (next.port === "80") next.port = "";
+    if (next.href === new URL(from).href) throw new Error("Source redirects to plain HTTP only");
+  }
+  return next.href;
+}
+
 // Pin the checked DNS result for each request; redirects are independently checked.
 export async function fetchSource(input, hosts, redirects = 0) {
   if (redirects > 3) throw new Error("Too many source redirects");
@@ -58,7 +113,7 @@ export async function fetchSource(input, hosts, redirects = 0) {
   if (!addresses.length || blocked) throw new Error(`Source resolved to a non-public address${blocked ? ` (${blocked.address})` : ""}`);
   const response = await new Promise((resolve, reject) => {
     const request = https.get(url, {
-      headers: { "user-agent": "TKnowledgeFeed/1.0", accept: "text/html, application/rss+xml, application/atom+xml, application/xml", "accept-encoding": "identity" },
+      headers: { "user-agent": "Mozilla/5.0 (compatible; TKnowledgeFeed/1.0; personal feed reader)", accept: "text/html, application/rss+xml, application/atom+xml, application/xml", "accept-encoding": "identity" },
       lookup: (_host, options, callback) => options.all
         ? callback(null, addresses.map(({ address }) => ({ address, family: 4 })))
         : callback(null, addresses[0].address, 4),
@@ -66,16 +121,20 @@ export async function fetchSource(input, hosts, redirects = 0) {
       const chunks = []; let size = 0;
       res.on("data", (chunk) => {
         size += chunk.length;
-        if (size > 1_000_000) { res.destroy(); reject(new Error("Source exceeds 1 MB limit")); } else chunks.push(chunk);
+        // Some feeds carry full article bodies and run to a few megabytes.
+        if (size > 5_000_000) { res.destroy(); reject(new Error("Source exceeds 5 MB limit")); } else chunks.push(chunk);
       });
       res.on("error", reject);
-      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString("utf8") }));
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, text: decode(Buffer.concat(chunks), res.headers) }));
     });
     const deadline = setTimeout(() => request.destroy(new Error("Source timed out")), 15000);
     request.on("close", () => clearTimeout(deadline)); request.on("error", reject);
   });
   if ([301,302,303,307,308].includes(response.status) && response.headers.location)
-    return fetchSource(new URL(response.headers.location, url).href, hosts, redirects + 1);
+  {
+    const next = nextHop(response.headers.location, url);
+    return fetchSource(next, withSameSite(hosts, next, url), redirects + 1);
+  }
   if (response.status !== 200) throw new Error(`Source returned HTTP ${response.status}`);
   if (!/html|xml|text\/plain/i.test(response.headers["content-type"] ?? "")) throw new Error("Unsupported source format");
   return { url: url.href, text: response.text, accessedAt: new Date().toISOString() };
@@ -83,7 +142,9 @@ export async function fetchSource(input, hosts, redirects = 0) {
 
 export function discoverXML(xml, hosts, limit = 10) {
   const parsed = new XMLParser({ ignoreAttributes: false, processEntities: false }).parse(xml);
-  const raw = parsed.rss?.channel?.item ?? parsed.feed?.entry ?? [];
+  // RSS 2.0, Atom, and RSS 1.0 (RDF, used by Nature), where items sit beside the channel, not inside it.
+  const rdf = parsed["rdf:RDF"];
+  const raw = parsed.rss?.channel?.item ?? parsed.feed?.entry ?? rdf?.item ?? rdf?.channel?.item ?? [];
   const items = Array.isArray(raw) ? raw : [raw];
   const urls = [];
   for (const item of items) {
@@ -95,6 +156,22 @@ export function discoverXML(xml, hosts, limit = 10) {
 }
 
 /**
+ * For a site with no feed: collect article links from one of its listing pages. `match` (a regular
+ * expression) says which links are articles, e.g. "/doc/"; without it every on-site link would qualify.
+ */
+export function discoverHTML(html, pageUrl, hosts, match, limit = 10) {
+  const $ = load(html);
+  const urls = [];
+  $("a[href]").each((_, element) => {
+    try {
+      const url = safeURL(new URL($(element).attr("href"), pageUrl).href, hosts).href;
+      if (!match || new RegExp(match).test(url)) urls.push(url);
+    } catch { /* Off-site, relative junk or javascript: links. */ }
+  });
+  return [...new Set(urls)].slice(0, limit);
+}
+
+/**
  * Split article text into sentences for citation by number. Deliberately simple: a boundary is terminal
  * punctuation (optionally followed by closing quotes or brackets) then whitespace then a capital, digit or
  * opening quote. Imperfect splits are harmless — a cited "sentence" is still verbatim source text.
@@ -102,10 +179,22 @@ export function discoverXML(xml, hosts, limit = 10) {
 export function splitSentences(text, max = 400) {
   return String(text)
     .split(/(?<=[.!?…]["'”’)\]]*)\s+(?=["'“‘(\[]?[A-Z0-9])/)
+    // Chinese and Japanese end sentences with 。！？ and no following space.
+    .flatMap((part) => part.split(/(?<=[。！？][」』”’）]*)/))
+    // A very long "sentence" usually means blocks ran together with no space after the full stop.
+    .flatMap((part) => part.length > 500 ? part.split(/(?<=[a-z0-9)][.!?]["'”’]?)(?=["“‘]?[A-Z])/) : [part])
     .map((sentence) => sentence.trim())
     .filter(Boolean)
     .slice(0, max);
 }
+
+/**
+ * Pages that give non-subscribers only a teaser. Summarising the teaser would produce a thin post about
+ * the paywall rather than the article, so such pages are refused.
+ */
+const PAYWALL = /subscribe (now )?to (read|continue)|to continue reading|already a (subscriber|member)\?|this (article|content|story) is (only )?(available|reserved|exclusive) (to|for) (subscribers|members)|register (now |free )?to (read|continue)|sign in to (read|continue reading)|unlock (this|the full) article|subscriber-only|for subscribers only/i;
+const MIN_ARTICLE_CHARS = 800;
+const PAYWALL_TEASER_CHARS = 3000;
 
 /**
  * Keep the source short enough that the draft and the review both fit a small
@@ -117,9 +206,20 @@ export function extractArticle(response, publisher, maxChars = 10000) {
   const title = normalise($("meta[property='og:title']").attr("content") || $("title").text());
   const rawDate = $("meta[property='article:published_time']").attr("content") || $("time[datetime]").first().attr("datetime");
   const articleDate = rawDate && Number.isFinite(Date.parse(rawDate)) ? new Date(rawDate).toISOString() : null;
-  $("script,style,nav,footer,header,noscript,form,aside").remove();
+  $("script,style,nav,footer,header,noscript,form,aside,figure,figcaption,button,svg,[aria-hidden='true']").remove();
   const main = $("article").first().length ? $("article").first() : $("main").first().length ? $("main").first() : $("body");
-  const text = normalise(main.text()).slice(0, maxChars);
-  if (text.length < 300 || !title) throw new Error("Not enough accessible source material");
+  // Prefer the article's paragraphs: that drops share buttons, "Listen (5 mins)", photo credits and
+  // "Recommended stories" lists. Fall back to all text for pages that do not use <p>.
+  const paragraphs = main.find("p").map((_, p) => normalise($(p).text())).get().filter((p) => p.length >= 40);
+  // Without this, cheerio runs adjacent blocks together ("…the world.“If managed…"), and the sentence
+  // splitter, which needs a space after a full stop, sees one giant sentence.
+  main.find("p,h1,h2,h3,h4,h5,h6,li,blockquote,div,section,br,tr,td").after(" ");
+  const full = paragraphs.join(" ").length >= MIN_ARTICLE_CHARS ? paragraphs.join(" ") : normalise(main.text());
+  // A long page that merely mentions subscribing (an upsell box after the article) is not a teaser; a paywall
+  // leaves only a few paragraphs.
+  if (PAYWALL.test(full) && full.length < PAYWALL_TEASER_CHARS) throw new Error("Paywalled: only a teaser is readable");
+  const text = full.slice(0, maxChars);
+  // Short pages are usually video, gallery or live-blog stubs with little to summarise.
+  if (text.length < MIN_ARTICLE_CHARS || !title) throw new Error("Not enough accessible source material");
   return { url: response.url, publisher, title: title.slice(0,200), articleDate, accessedAt: response.accessedAt, text, hash: digest(text) };
 }

@@ -5,7 +5,7 @@ import { safeURL, publicIPv4, discoverXML, extractArticle, splitSentences } from
 import { citedExcerpt, draftCandidates, settleDraft, slugs } from "../../scripts/content/engine.mjs";
 import { ModelChainError, generateJSON, liveModels, modelConfig } from "../../scripts/content/model.mjs";
 const now = Date.parse("2026-09-23T10:00:00Z");
-const text = "A test source describes the conservation of energy. ".repeat(12);
+const text = "A test source describes the conservation of energy. ".repeat(20);
 const response = {url:"https://example.org/article",accessedAt:new Date(now).toISOString(),text:`<html><title>Energy</title><article>${text}</article></html>`};
 const source = extractArticle(response,"Example");
 const {text:unusedText,hash:unusedHash,...citation} = source;
@@ -67,15 +67,15 @@ test("articles split into sentences, keeping closing quotes and not breaking on 
     ["It works.", "“Really?” she asked.", "The U.S. team agreed, e.g. twice.", "2026 was a year."]);
 });
 test("claims cite sentence numbers; the engine fills in the verbatim sentences and the draft passes", async () => {
-  const article = { ...response, text:`<html><title>Energy</title><article>${"Energy is neither created nor destroyed in a closed system. ".repeat(6)}Engineers rely on this principle when designing engines. It explains why perpetual motion is impossible.</article></html>` };
+  const article = { ...response, text:`<html><title>Energy</title><article>${"Energy is neither created nor destroyed in a closed system. ".repeat(14)}Engineers rely on this principle when designing engines. It explains why perpetual motion is impossible.</article></html>` };
   const prompts = []; const saved = [];
-  const cited = { ...structuredClone(draft), claims:[{ claim:"Engineers rely on it", sentences:[7] }, { claim:"Perpetual motion is impossible", sentences:[7,8] }] };
+  const cited = { ...structuredClone(draft), claims:[{ claim:"Engineers rely on it", sentences:[15] }, { claim:"Perpetual motion is impossible", sentences:[15,16] }] };
   await draftCandidates({ groups:[{ publisher:"Example", hosts:["example.org"], feeds:[], articles:[source.url] }], retrieve:async()=>article,
     generate:async(args)=>{ prompts.push(args); return args.schema.properties.supported ? { ...review, claims:[review.claims[0], { ...review.claims[0], index:1 }] } : structuredClone(cited); },
     save:async(c)=>saved.push(c) });
   // The model saw numbered sentences, not the raw text.
   assert.equal(prompts[0].input.source.text, undefined);
-  assert.equal(prompts[0].input.source.sentences[6], "[7] Engineers rely on this principle when designing engines.");
+  assert.equal(prompts[0].input.source.sentences[14], "[15] Engineers rely on this principle when designing engines.");
   assert.equal(saved[0].status, "checked", JSON.stringify(saved[0].checks.errors));
   assert.equal(saved[0].payload.claims[0].excerpt, "Engineers rely on this principle when designing engines.");
   assert.equal(saved[0].payload.claims[1].excerpt, "Engineers rely on this principle when designing engines. It explains why perpetual motion is impossible.");
@@ -188,7 +188,7 @@ test("per-model preference lists keep their order within each provider", () => {
 test("an unconfigured provider is skipped, and nothing configured fails closed", () => {
   const onlyMistral = modelConfig({ MISTRAL_API_KEY:"m", CONTENT_MISTRAL_MODEL:"x" });
   assert.deepEqual(onlyMistral.chain.map((p) => p.name), ["mistral"]);
-  assert.match(onlyMistral.skipped[0], /OPENROUTER_API_KEY/);
+  assert.match(onlyMistral.skipped.join(" "), /GEMINI_API_KEY/); assert.match(onlyMistral.skipped.join(" "), /OPENROUTER_API_KEY/);
   assert.throws(() => modelConfig({}), /Configure at least one/);
 });
 test("the chain is swappable by configuration alone", () => {
@@ -430,7 +430,7 @@ test("a worst-case draft and review each fit Groq's ~8K tokens a minute, output 
   const preferences = Array.from({ length:20 }, (_, i) => ({ topic:"A reasonably long topic", subtopic:`A reasonably long subtopic ${i}`, more:3, harder:2, uninteresting:1, averageDifficulty:2.5 }));
   const { text:_t, hash:_h, ...bigCitation } = bigSource; void _t; void _h;
   // Quotes and citation must genuinely come from the source, or the engine rightly skips the review call.
-  const bigDraft = { ...structuredClone(draft), explanation:["x".repeat(1100)], deeper:"y".repeat(1500), sources:[bigCitation],
+  const bigDraft = { ...structuredClone(draft), conceptIds:["lengthy-words"], explanation:["x".repeat(1100)], deeper:"y".repeat(1500), sources:[bigCitation],
     claims:Array.from({ length:10 }, () => ({ claim:"c".repeat(150), url:bigSource.url, excerpt:"lengthy words ".repeat(11).trim() })) };
   const prompts = [];
   await draftCandidates({ groups:[group], retrieve:async()=>long, concepts, preferences,

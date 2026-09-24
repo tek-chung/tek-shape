@@ -14,30 +14,45 @@ retrieved, and a second model call reviews the draft sceptically. Drafts that fa
 
 1. Apply `supabase/migrations/202609230001_content_engine.sql`, then `202609240001_model_providers.sql`, in
    the Supabase SQL Editor, in that order.
-2. Get free keys: Mistral from the [Mistral console](https://console.mistral.ai), OpenRouter from
+2. Get free keys: Gemini from [aistudio.google.com/apikey](https://aistudio.google.com/apikey), Mistral from the [Mistral console](https://console.mistral.ai), OpenRouter from
    [openrouter.ai/keys](https://openrouter.ai/keys).
-3. Fill `MISTRAL_API_KEY` and `OPENROUTER_API_KEY` in `.env.local`. See `.env.example` for every setting.
+3. Fill `GEMINI_API_KEY`, `MISTRAL_API_KEY` and `OPENROUTER_API_KEY` in `.env.local`. See `.env.example` for every setting.
 4. Run `npm run content -- models`. It lists the free OpenRouter models available right now; copy one or
    more IDs into `CONTENT_OPENROUTER_MODEL`, best first. (Until you do, OpenRouter is skipped and Mistral
    runs alone — nothing breaks.)
 5. Check the chain with `npm run content -- providers`, then run once by hand: `npm run content -- cycle`.
 
-Sources default to `content-sources.example.json` (Quanta, Aeon, NASA). To use your own, copy it to
-`content-sources.local.json`, which is git-ignored. Each group lists its `hosts`: the engine refuses to fetch
-anything outside them, and refuses private network addresses, so a hostile feed cannot point it elsewhere.
+Sources default to `content-sources.example.json`, which is committed, so the scheduled workflow uses it
+without a secret. To override it, set `CONTENT_SOURCES_JSON` or `CONTENT_SOURCES_FILE`, or add
+`content-sources.local.json`. Each group lists its `hosts`: the engine refuses to fetch anything outside
+them, and refuses private network addresses, so a hostile feed cannot point it elsewhere.
+
+Group options (at most 30 groups, 20 feeds, pages and articles each):
+
+- `feeds`: RSS or Atom URLs. `articles`: fixed article URLs.
+- `pages`: listing pages for sites with no feed (e.g. hk.crntt.com). A `match` pattern is required.
+- `match` / `skip`: regular expressions on article URLs, e.g. Nature `"/articles/d41586-"` keeps news and
+  drops paywalled papers; Al Jazeera `"/video/|/liveblog/"` drops stubs.
+- `openHosts: true`: for aggregators (Hacker News) whose links go to any site. Linked articles still need
+  HTTPS and a public address, and are credited as "site (via Hacker News)".
+
+Articles are taken one per publisher in turn, so no single feed crowds out the rest; with more groups
+than `CONTENT_DRAFT_LIMIT`, each run covers the next publishers. Pages that show a subscriber teaser, or
+fewer than 800 characters, are skipped. Non-English sources are summarised in English, citing the
+original sentences. `npm run content -- check` now fetches each group and tries a sample article.
 
 ## Providers
 
-Providers are tried in the order of `CONTENT_PROVIDERS` (default `mistral,openrouter`). If one fails —
+Providers are tried in the order of `CONTENT_PROVIDERS` (default `gemini,mistral,openrouter`; Gemini 3.5 Flash-Lite free tier: 15 RPM, 250K TPM, 500 requests a day). If one fails —
 rate limit, outage, quota, a truncated or malformed answer — the next is tried. A provider is skipped, not
 fatal, if its key or model is missing.
 
 | Provider | Key variable | Model variable | Default models |
 |---|---|---|---|
-| `mistral` (primary) | `MISTRAL_API_KEY` | `CONTENT_MISTRAL_MODEL` | `ministral-14b-latest,ministral-8b-latest,mistral-medium-latest` |
-| `openrouter` (fallback) | `OPENROUTER_API_KEY` | `CONTENT_OPENROUTER_MODEL` | `qwen/qwen3.8-27b:free,nex-agi/nex-n2.5-pro:free` |
+| `gemini` (primary) | `GEMINI_API_KEY` | `CONTENT_GEMINI_MODEL` | `gemini-3.5-flash-lite,gemini-flash-lite-latest` |
+| `mistral` (fallback) | `MISTRAL_API_KEY` | `CONTENT_MISTRAL_MODEL` | `ministral-14b-latest,ministral-8b-latest` |
+| `openrouter` (second fallback) | `OPENROUTER_API_KEY` | `CONTENT_OPENROUTER_MODEL` | `qwen/qwen3.8-27b:free,nex-agi/nex-n2.5-pro:free` |
 | `groq` | `GROQ_API_KEY` | `CONTENT_GROQ_MODEL` | `qwen/qwen3.8-27b,qwen/qwen3-32b` if enabled |
-| `gemini` | `GEMINI_API_KEY` | `CONTENT_GEMINI_MODEL` | — not offered free in the UK |
 | `openai` | `OPENAI_API_KEY` | `CONTENT_OPENAI_MODEL` | — paid |
 
 OpenRouter requests carry `provider.require_parameters: true`, so they are only routed to hosts that honour
@@ -95,6 +110,13 @@ For OpenRouter, `models` lists only free (`:free`) models, since those are the o
 
 Each post costs one or two calls: one to draft, and one to review if the draft passes the deterministic
 checks. `CONTENT_DRAFT_LIMIT` (default 8) caps drafts per run.
+
+## Checks
+
+`CONTENT_CHECKS=strict` (default): every claim must cite source sentences that exist, and a second AI call
+reviews the post. `CONTENT_CHECKS=off`: format checks only and no review call — half the AI calls, but
+claims are not verified; rely on the source link. Concept tags never hold a post: unusable ones fall back
+to the subtopic and topic.
 
 ## Publishing
 
