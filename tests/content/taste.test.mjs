@@ -199,3 +199,18 @@ test("triage skips resting headlines before any drafting call, drafts the best f
   assert.equal(prompts[0].input.source.url, urls[2], "the most promising headline is drafted first");
   assert.deepEqual(prompts[0].input.guidance, { field: "quantum-physics", targetDifficulty: 4 });
 });
+
+test("a batch always makes room for the best waiting excerpt, which would otherwise never win a place", () => {
+  const fields = ["algebra-number-theory", "quantum-physics", "ethics", "artificial-intelligence", "modern-history", "neuroscience", "corporate-finance", "public-policy"];
+  const from = (n) => [{ publisher: `Publisher ${n % 12}` }];
+  const history = fields.flatMap((f) => [0, 1, 2, 3].map((i) => post(f, `${f} ${i}`, { sources: from(i * 3 + f.length) })));
+  const model = buildTaste({ posts: history, states: history.map((p) => state(p, { read_at: ago(2), bookmarked: true })), now });
+  const drafted = fields.flatMap((f) => Array.from({ length: 12 }, (_, i) => post(f, `${f} fresh ${i}`, { difficulty: 2 + (i % 2), sources: from(i * 7 + f.length) })));
+  const excerpt = { ...post("corporate-finance", "CFO playbooks", { difficulty: 1, sources: [{ publisher: "CFO Secrets" }] }), kind: "excerpt" };
+  const placed = (candidate, need, seed) => rankQueue({ model, candidates: [...drafted, candidate], assigned: history, need, now, random: seededRandom(seed) })
+    .some((p) => p.id === candidate.id);
+  for (const seed of [1, 2, 3, 4, 5]) {
+    assert.equal(placed(excerpt, 10, seed), true, `seed ${seed}: the excerpt has its place`);
+    assert.equal(placed({ ...excerpt, kind: undefined }, 10, seed), false, `seed ${seed}: the same post, not an excerpt, loses to full posts`);
+  }
+});

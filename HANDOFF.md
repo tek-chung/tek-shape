@@ -384,6 +384,13 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
   subtitle. URL keyword rules file careers and leadership issues; `plainTitle` strips emoji from
   headlines. If the permission covers AI summaries too, drop `mode`/`excerptFrom` to draft it normally.
   29 groups; content tests 108.
+- First live run: 6 excerpts published, none queued. With many publishers competing, a one-paragraph
+  excerpt (difficulty 1, unknown publisher) never wins a favourite slot (0/40 seeds in a probe). Fix in
+  `rankQueue`: one favourite slot per batch (index ≥ 3, never the opener) goes to the best waiting excerpt
+  if its value is at least 0.6 × prior; excerpts get neutral difficulty fit. `POST_COLUMNS` now reads
+  `kind` (needs 202609300001). Log lines for excerpts read `[excerpt, no AI]`; `publishChecked` reports
+  `excerptsPublished` and warns when the excerpt migration is missing; `prepare` reports `unreadBefore`;
+  `status` lists excerpts per publisher (saved / published / in feed / unread). Content tests 109.
 
 ## 6. Next steps
 

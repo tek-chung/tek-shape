@@ -65,14 +65,17 @@ test("excerpt sources never reach a model: the publisher's own words, filed by r
     item({ slug: "hype", title: "Hype", description: `Brace yourself: ${long(30)}.`, categories: ["Artificial intelligence", "App", "Opinion"] }),
     item({ slug: "third", title: "Third", description: `A third item ${long(30)}.` }),
   ]);
-  const saved = []; const triaged = [];
+  const saved = []; const triaged = []; const events = [];
   const metrics = await draftCandidates({
     groups: [techReview], retrieve: async () => ({ text: xml }), save: async (c) => saved.push(c),
     generate: async () => { throw new Error("an excerpt source must never call a model"); },
     triage: async (entries) => { triaged.push(...entries); return new Map(); },
+    onProgress: (event) => events.push(event),
   });
   assert.equal(triaged.length, 0, "not even the headlines are sent for triage");
   assert.equal(metrics.excerpts, 2, "perRun caps each run");
+  assert.equal(metrics.retrieved, 0, "excerpts use none of the AI draft limit");
+  assert.deepEqual(events.map((e) => e.stage), ["excerpt", "excerpt"], "and are labelled as excerpts, not as draft 0 of the limit");
   const [towers, hype] = saved.map((c) => c.payload);
   assert.equal(towers.kind, "excerpt");
   assert.deepEqual(towers.explanation, [opening], "the opening paragraph of the saved article, not the feed's cut-off teaser");

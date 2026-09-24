@@ -44,7 +44,7 @@ async function result(query) {
 }
 let db;
 // Everything the engine reads about a post, and not the saved article bodies, which can be tens of kilobytes each.
-const POST_COLUMNS = "id,topic,title,explanation,insight,deeper,status,published_at,content_type,subtopic,difficulty,concept_ids,event_date,article_date,verification_status,sources,reviewed_at,umbrella,field";
+const POST_COLUMNS = "id,topic,title,explanation,insight,deeper,status,published_at,content_type,subtopic,difficulty,concept_ids,event_date,article_date,verification_status,sources,reviewed_at,umbrella,field,kind";
 async function all(table, columns = "*") {
   const rows = [];
   for (let from = 0; ; from += 500) {
@@ -136,7 +136,8 @@ async function draft(config) {
     },
     guidance: (field) => (field ? { field, targetDifficulty: Math.round(model.targetDifficulty(field) * 2) / 2 } : undefined),
     // stderr, so the JSON summary on stdout stays clean for anything that parses it.
-    onProgress: ({ n, limit, publisher, outcome }) => console.error(`[${n}/${limit}] ${publisher}: ${outcome}`),
+    // Drafts count against the limit; feed problems and excerpts (no AI) do not, so they are labelled instead.
+    onProgress: ({ n, limit, publisher, outcome, stage }) => console.error(`${stage === "excerpt" ? "[excerpt, no AI]" : stage === "feed" ? "[feed]" : `[${n}/${limit}]`} ${publisher}: ${outcome}`),
     generate: (args) => generateJSON({ ...args, config, trace, reserve }),
     save: (candidate) => result(db.from("content_candidate").upsert(
       { ...candidate, checks: { ...candidate.checks, models: trace.splice(0) } },
@@ -191,9 +192,11 @@ const checksMode = () => (/^off$/i.test(process.env.CONTENT_CHECKS ?? "") ? "off
 
 async function publishChecked() {
   const candidates = await result(db.from("content_candidate").select("id,payload,evidence,checks").eq("status", "checked").limit(200));
-  const metrics = { published: 0, needsRecheck: 0, rejected: 0 };
+  const metrics = { published: 0, excerptsPublished: 0, needsRecheck: 0, rejected: 0 };
+  let needsMigration = 0;
   for (const candidate of candidates) {
     if (!passesChecks(candidate)) { metrics.needsRecheck++; continue; }
+    const excerpt = candidate.checks?.mode === "excerpt";
     const models = [...new Set((candidate.checks?.models ?? []).filter((m) => m.ok).map((m) => `${m.provider}/${m.model}`))];
     try {
       await result(db.rpc("publish_candidate", {
@@ -205,10 +208,17 @@ async function publishChecked() {
           : `Auto-published: passed source-excerpt checks and model review (${models.join(", ") || "model unrecorded"}).`,
       }));
       metrics.published++;
-    } catch {
-      // Typically stale news or a candidate past its review window; it stays unpublished.
+      if (excerpt) metrics.excerptsPublished++;
+    } catch (error) {
+      // Typically stale news or a candidate past its review window; it stays unpublished. An excerpt refused
+      // for its missing insight, or for the columns it needs, means the database is a migration behind.
+      if (excerpt && /insight|deeper|kind|body/i.test(String(error?.message))) needsMigration++;
       metrics.rejected++;
     }
+  }
+  if (needsMigration) {
+    metrics.excerptsWaiting = needsMigration;
+    console.error(`${needsMigration} excerpt${needsMigration === 1 ? "" : "s"} can't be published until supabase/migrations/202609300001_excerpts.sql is applied in the SQL Editor; they will be published on the first run after.`);
   }
   return metrics;
 }
@@ -233,7 +243,8 @@ async function prepare() {
   for (const pick of picks) await result(db.from("feed_queue").update({ slot: pick.slot }).eq("user_id", reader.user_id).eq("post_id", pick.id));
   await result(db.from("taste_snapshot").upsert({ user_id: reader.user_id, computed_at: new Date(model.now).toISOString(), model: snapshotOf(model) }, { onConflict: "user_id" }));
   const slots = picks.reduce((counts, p) => ({ ...counts, [p.slot]: (counts[p.slot] ?? 0) + 1 }), {});
-  return { added, targetUnread: target, slots, exploreShare: model.exploreShare, feed: model.metrics, nichesFound: model.niches.length };
+  // unreadBefore at or above the target means the feed was full: new posts wait until some are read.
+  return { added, unreadBefore: unread, targetUnread: target, slots, exploreShare: model.exploreShare, feed: model.metrics, nichesFound: model.niches.length };
 }
 
 async function withRun(stage, work) {
@@ -456,16 +467,33 @@ async function main() {
     console.log("Published reviewed candidate. Run prepare to append it to the reading queue.");
   } else if (command === "status") {
     const [candidates, queue, states, budget, runs] = await Promise.all([
-      all("content_candidate", "id,status"), all("feed_queue"), all("user_post_state", "post_id,read_at"),
+      all("content_candidate", "id,status,kind:payload->>kind,publisher:evidence->0->>publisher"), all("feed_queue"), all("user_post_state", "post_id,read_at"),
       result(db.from("content_budget").select("*").order("day", { ascending: false }).order("provider").limit(21)),
       result(db.from("content_run").select("*").order("started_at", { ascending: false }).limit(5)),
     ]);
     const read = new Set(states.filter((s) => s.read_at).map((s) => s.post_id));
-    const { model } = await loadTaste(await all("post"), await all("user_post_state"));
+    const { model } = await loadTaste(await all("post", POST_COLUMNS), states);
     const pct = (v) => (v === null ? "not enough yet" : `${Math.round(v * 100)}%`);
+    // Excerpts (no AI) by publisher: saved as candidates, published, in the feed, still unread.
+    let excerpts;
+    try {
+      const posts = await all("post", "id,kind,publisher:sources->0->>publisher");
+      const queued = new Set(queue.map((q) => q.post_id));
+      const tally = {};
+      const bump = (publisher, key) => { tally[publisher] ??= { saved: 0, published: 0, inFeed: 0, unread: 0 }; tally[publisher][key]++; };
+      for (const c of candidates) if (c.kind === "excerpt") bump(c.publisher ?? "?", "saved");
+      for (const p of posts) if (p.kind === "excerpt") {
+        bump(p.publisher ?? "?", "published");
+        if (queued.has(p.id)) { bump(p.publisher ?? "?", "inFeed"); if (!read.has(p.id)) bump(p.publisher ?? "?", "unread"); }
+      }
+      excerpts = tally;
+    } catch {
+      excerpts = "apply supabase/migrations/202609300001_excerpts.sql: excerpts cannot be published without it";
+    }
     console.log(JSON.stringify({
       candidates: candidates.reduce((counts, c) => ({ ...counts, [c.status]: (counts[c.status] ?? 0) + 1 }), {}),
       queued: queue.length, unread: queue.filter((q) => !read.has(q.post_id)).length,
+      excerpts,
       // Local terminal only: subtopic names are the reader's own taste, never printed in CI.
       feed: { postsGraded: model.metrics.placed, readOrBetter: pct(model.metrics.hitRate), delighted: pct(model.metrics.delightRate),
         explorationsLanding: pct(model.metrics.explorationHitRate), exploreShare: pct(model.exploreShare) },

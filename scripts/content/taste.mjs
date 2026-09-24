@@ -264,7 +264,8 @@ function expected(model, post, known) {
   const e = model.estimate(post.field, post.subtopic);
   const choice = model.prefFor(e.place.field, e.sKey)?.choice;
   let value = e.mean + 0.3 * (model.publisherMean(publisherOfPost(post)) - model.prior);
-  const fit = Math.exp(-(((post.difficulty ?? 2) - model.targetDifficulty(e.place.field)) ** 2) / 2);
+  // An excerpt is the publisher's own summary, with no difficulty of its own to fit: neutral.
+  const fit = post.kind === "excerpt" ? 1 : Math.exp(-(((post.difficulty ?? 2) - model.targetDifficulty(e.place.field)) ** 2) / 2);
   value *= (0.85 + 0.15 * fit) * model.multiplier(choice);
   const concepts = post.concept_ids ?? [];
   const novelty = concepts.length ? concepts.filter((c) => !known.has(c)).length / concepts.length : 1;
@@ -298,7 +299,7 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
   const seenSubtopics = new Set(assigned.map((p) => subtopicKey(placeOf(p.field).field, p.subtopic)));
   const describe = (p) => {
     const place = placeOf(p.field);
-    return { post: p, id: p.id, field: place.field, umbrella: place.umbrella, subKey: subtopicKey(place.field, p.subtopic), publisher: publisherOfPost(p) };
+    return { post: p, id: p.id, field: place.field, umbrella: place.umbrella, subKey: subtopicKey(place.field, p.subtopic), publisher: publisherOfPost(p), excerpt: p.kind === "excerpt" };
   };
 
   const pool = [];
@@ -352,17 +353,25 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
     const raw = SETTINGS.batch * model.exploreShare - 1;
     const explores = Math.max(0, Math.floor(raw) + (random() < raw - Math.floor(raw) ? 1 : 0));
     const slots = layout(SETTINGS.batch, explores).slice(0, size);
-    for (const slot of slots) {
+    // Excerpt sources (no AI) were asked for by name, but a one-paragraph excerpt rarely outscores a full post,
+    // so one favourite slot per batch goes to the best waiting excerpt — unless the reader has come to dislike
+    // what is on offer, which the taste model then says.
+    const excerptAt = slots.length >= 2 ? slots.findIndex((s, i) => i >= Math.min(3, slots.length - 1) && s === "favourite") : -1;
+    for (const [index, slot] of slots.entries()) {
       if (!pool.length) break;
       let pick = null;
-      if (slot === "stretch") {
+      if (index === excerptAt) {
+        const offer = best((c) => c.fav, (c) => c.excerpt);
+        if (offer && offer.fav >= 0.6 * model.prior) pick = offer;
+      }
+      if (!pick && slot === "stretch") {
         // Breadth floor first: an area with posts waiting that has not appeared recently.
         const due = new Set(pool.map((c) => c.umbrella).filter((u) => u !== "other" && !recentUmbrellas.has(u)));
         pick = (due.size && best((c) => c.explore, (c) => due.has(c.umbrella)))
           || best((c) => c.fav, (c) => c.harderStretch)
           || best((c) => c.explore);
-      } else if (slot === "explore") pick = best((c) => c.explore);
-      else pick = best((c) => c.fav);
+      } else if (!pick && slot === "explore") pick = best((c) => c.explore);
+      else if (!pick) pick = best((c) => c.fav);
       if (!pick) break;
       pool.splice(pool.indexOf(pick), 1);
       history.push(pick); recentUmbrellas.add(pick.umbrella);

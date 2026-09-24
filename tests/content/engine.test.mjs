@@ -457,7 +457,7 @@ test("progress reports publisher and outcome only, never article text", async ()
   const events = [];
   await draftCandidates({ groups:[group], retrieve:async()=>response, onProgress:(e)=>events.push(e),
     generate:async(args)=>args.schema.properties.supported ? review : structuredClone(draft), save:async()=>{} });
-  assert.deepEqual(events, [{ n:1, limit:4, publisher:"Example", outcome:"passed checks" }]);
+  assert.deepEqual(events, [{ n:1, limit:4, publisher:"Example", outcome:"passed checks", stage:"draft" }]);
   assert.doesNotMatch(JSON.stringify(events), /conservation of energy/);
 });
 test("rate-limiting everywhere stops the run instead of hammering the remaining articles", async () => {

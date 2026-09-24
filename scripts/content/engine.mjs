@@ -174,14 +174,15 @@ export async function draftCandidates({ groups, generate, save, concepts = [], p
   const metrics = { discovered:0, retrieved:0, checked:0, held:0, sourceFailures:0, alreadyDrafted:0, modelFailures:0, stopped:null, triaged:0, skippedByTaste:0, excerpts:0 };
   const seen = new Set();
   // Progress carries publisher names and outcomes only — never article text — since CI logs are public.
-  const report = (publisher, outcome) => onProgress({ n: metrics.retrieved, limit, publisher, outcome });
+  // `stage` says what the line is about: a feed, an excerpt (no AI, so not counted against `limit`), or a draft.
+  const report = (publisher, outcome, stage = "draft") => onProgress({ n: metrics.retrieved, limit, publisher, outcome, stage });
   // Sources in the order (and with the turns) the taste model asks for; otherwise as configured.
   const planned = plan ? plan(groups) : groups.map((group) => ({ group, turns: 1 }));
   let lists = [];
   // What each feed said about each article: its summary, categories and, where kept, its body.
   const details = new Map();
   for (const { group, turns } of planned) {
-    const found = await discover(group, retrieve, (why) => { metrics.sourceFailures++; report(group.publisher, `feed unreachable (${why})`); });
+    const found = await discover(group, retrieve, (why) => { metrics.sourceFailures++; report(group.publisher, `feed unreachable (${why})`, "feed"); });
     const fresh = found.urls.filter((url) => !known.has(url));
     metrics.alreadyDrafted += found.urls.length - fresh.length;
     for (const [url, item] of found.titles) if (!details.has(url)) details.set(url, item);
@@ -200,7 +201,7 @@ export async function draftCandidates({ groups, generate, save, concepts = [], p
         if (!candidate) { metrics.sourceFailures++; continue; }
         await save(candidate);
         metrics.excerpts++; taken++;
-        report(list.group.publisher, `saved an excerpt${candidate.payload.body ? " with the full text" : ""}`);
+        report(list.group.publisher, `saved an excerpt${candidate.payload.body ? " with the full text" : ""}`, "excerpt");
       } catch { metrics.sourceFailures++; }
     }
   }
