@@ -343,6 +343,17 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
   `feed_page` migration used to look like a stale feed).
 - New `npm run test:client` (Node type stripping, no new dependencies): `tests/client/storage.test.mjs`.
 
+## 5n. Gemini 400 on every draft (24 Sep 2026)
+
+- After the subject map shipped, every draft call returned HTTP 400 from both Gemini models (not 429: quota
+  was fine, ~350 of 500 that day). The 04:57 UTC run on the older schema drafted 26 posts; the triage call,
+  whose small schema carries the same 69-value field enum, kept working. Cause: the enum made the large
+  draft schema too complex for Gemini's structured output ("very large ... schemas may be rejected").
+- Fix: `draftSchema.field` is a plain string; `DRAFT_INSTRUCTION` lists the IDs (`TAXONOMY_PROMPT`);
+  `settleDraft(..., fallbackField)` folds case/spacing and falls back to triage's field, then Other.
+  Triage and classify keep their enums. Test guards against a long enum returning to the draft schema.
+- Confirm with `npm run content -- probe` (real draft schema; prints Gemini's own error text if any).
+
 ## 6. Next steps
 
 1. **User:** `npm run lint` and `npm run build`.

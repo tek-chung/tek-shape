@@ -191,13 +191,27 @@ test("MIT SMR link pattern keeps articles and drops navigation", async () => {
 
 test("each post is filed in the subject map: the field decides the umbrella and the card's topic", async () => {
   const { FIELD_IDS, placeOf } = await import("../../scripts/content/taxonomy.mjs");
-  const { draftSchema } = await import("../../scripts/content/model.mjs");
+  const { draftSchema, triageSchema, classifySchema } = await import("../../scripts/content/model.mjs");
+  const { DRAFT_INSTRUCTION } = await import("../../scripts/content/engine.mjs");
   assert.equal(new Set(FIELD_IDS).size, FIELD_IDS.length, "field IDs are unique across umbrellas");
-  assert.deepEqual(draftSchema.properties.field.enum, FIELD_IDS);
+  // Gemini rejects the draft schema (HTTP 400) once it carries the full field list, so the list lives in the
+  // instruction; the small triage and classify schemas keep the enum.
+  const enums = (schema) => JSON.stringify(schema).match(/"enum":\[[^\]]*\]/g) ?? [];
+  assert.ok(enums(draftSchema).every((e) => e.split(",").length <= 5), "no long enum in the draft schema");
+  for (const id of FIELD_IDS) assert.ok(DRAFT_INSTRUCTION.includes(id), `the draft instruction lists ${id}`);
+  assert.deepEqual(triageSchema.properties.items.items.properties.field.enum, FIELD_IDS);
+  assert.deepEqual(classifySchema.properties.field.enum, FIELD_IDS);
   assert.equal(placeOf("china-hong-kong").umbrella, "politics-society");
   const source = { url: "https://p.example/a", publisher: "P", title: "T", articleDate: null, accessedAt: "2026-09-23T10:00:00.000Z", text: "Primes are numbers. They matter.", hash: "h" };
   const filed = settleDraft({ field: "algebra-number-theory", subtopic: "  Prime gaps. ", topic: "Maths stuff", claims: [], conceptIds: [] }, source);
   assert.deepEqual([filed.umbrella, filed.field, filed.topic, filed.subtopic], ["mathematics", "algebra-number-theory", "Mathematics", "Prime gaps"]);
   const unknown = settleDraft({ field: "astrology", subtopic: "", topic: "Science", claims: [], conceptIds: [] }, source);
   assert.deepEqual([unknown.umbrella, unknown.field, unknown.topic, unknown.subtopic], ["other", "general", "Science", "General"]);
+  // Checked in code now, not by the schema: near misses fold; an unknown ID falls back to triage's pick.
+  const folded = settleDraft({ field: " Algebra Number_Theory ", subtopic: "Primes", claims: [], conceptIds: [] }, source);
+  assert.equal(folded.field, "algebra-number-theory");
+  const rescued = settleDraft({ field: "astrology", subtopic: "Hong Kong Budget", claims: [], conceptIds: [] }, source, undefined, "china-hong-kong");
+  assert.deepEqual([rescued.umbrella, rescued.field], ["politics-society", "china-hong-kong"]);
+  const kept = settleDraft({ field: "quantum-physics", subtopic: "Qubits", claims: [], conceptIds: [] }, source, undefined, "china-hong-kong");
+  assert.equal(kept.field, "quantum-physics", "a valid choice by the drafting model stands");
 });

@@ -8,8 +8,11 @@ const nullable = { type: ["string", "null"] };
 const array = (items) => ({ type: "array", items });
 const object = (properties) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 export const draftSchema = object({
-  // Filed under one field of the fixed subject map; the engine derives the umbrella from it.
-  field:{ type:"string", enum:FIELD_IDS }, subtopic:string, title:string, explanation:array(string), insight:string, deeper:string,
+  // Filed under one field of the fixed subject map; the engine checks the ID and derives the umbrella from it.
+  // Deliberately not an enum here: the full list of field IDs inside this large schema is more than Gemini's
+  // structured output accepts (every draft came back HTTP 400), so the IDs are listed in the instruction
+  // instead. The small triage and classify schemas below carry the enum without trouble.
+  field:string, subtopic:string, title:string, explanation:array(string), insight:string, deeper:string,
   contentType:{ type:"string", enum:["news","evergreen"] }, difficulty:{ type:"integer" },
   conceptIds:array(string), eventDate:nullable, articleDate:nullable,
   sources:array(object({ url:string, publisher:string, title:string, articleDate:nullable, accessedAt:string })),
