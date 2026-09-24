@@ -40,6 +40,9 @@ jobs:
       CONTENT_GEMINI_MIN_INTERVAL_MS: "4500"
       CONTENT_GEMINI_DAILY_CALLS: "450"
       CONTENT_MISTRAL_MODEL: ${{ vars.CONTENT_MISTRAL_MODEL || 'ministral-14b-latest,ministral-8b-latest' }}
+      # The engine's own cap (default 100), not Mistral's: enough for a day of fallback if Gemini fails, and
+      # well inside the free plan's monthly allowance. Pay-as-you-go is off, so it can never be charged.
+      CONTENT_MISTRAL_DAILY_CALLS: "300"
       # Free OpenRouter models change often; run `npm run content -- models` and update this variable when one retires.
       CONTENT_OPENROUTER_MODEL: ${{ vars.CONTENT_OPENROUTER_MODEL || 'qwen/qwen3.8-27b:free,nex-agi/nex-n2.5-pro:free' }}
       CONTENT_OPENROUTER_DAILY_CALLS: "50"
