@@ -45,6 +45,13 @@
     "match": "^https://www\\.fastersmarter\\.io/\\d+-[a-z0-9-]+/$"
   },
   {
+    "publisher": "Investopedia",
+    "hosts": ["www.investopedia.com"],
+    "pages": ["https://www.investopedia.com/", "https://www.investopedia.com/financial-term-dictionary-4769738"],
+    "match": "^https://www\\.investopedia\\.com/(terms/[a-z0-9]/[a-z0-9-]+\\.asp|[a-z0-9-]+-\\d{7,}|[a-z0-9-]+\\.asp)$",
+    "skip": "about-us|contact|newsletter|sitemap|legal|privacy|terms-of-use|financial-term-dictionary|terms-beginning-with"
+  },
+  {
     "publisher": "MIT Sloan Management Review",
     "hosts": ["sloanreview.mit.edu"],
     "feeds": ["https://sloanreview.mit.edu/feed/"],

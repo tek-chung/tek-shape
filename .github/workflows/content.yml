@@ -58,16 +58,18 @@ jobs:
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: steps.ready.outputs.ok == 'true'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         if: steps.ready.outputs.ok == 'true'
         with:
           node-version: 24
           cache: npm
       - name: Install
         if: steps.ready.outputs.ok == 'true'
-        run: npm ci --no-audit --no-fund
+        # No install scripts: the content engine needs none, and skipping them keeps a job that holds
+        # secrets away from third-party postinstall code.
+        run: npm ci --no-audit --no-fund --ignore-scripts
       - name: Run one cycle
         if: steps.ready.outputs.ok == 'true'
         run: npm run content -- cycle

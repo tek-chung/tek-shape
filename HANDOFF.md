@@ -307,6 +307,11 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
 - **Order matters**: apply the migrations before deploying; the new app's `opened` patch is rejected by the old
   `save_post`, which would stall the outbox.
 
+- 24 Sep scheduled run (old code): Investopedia's two feed URLs gave 403/404 but its homepage and dictionary
+  pages were readable from GitHub's runners (the owner's own network got 403 on everything). Restored with
+  pages only. Workflow: actions v5 (Node 24), `npm ci --ignore-scripts`. That run used CONTENT_CHECKS=strict
+  (variable unset): 13 of 26 drafts held by the reviewer.
+
 ## 6. Next steps
 
 1. **User:** `npm run lint` and `npm run build`.
