@@ -3,10 +3,11 @@ import type { Post, PostSource, PostState, Rating, ReadingPosition, ReadingState
 export const emptyPost: PostState = { rating: null, bookmarked: false, expanded: false };
 export const initialState: ReadingState = { posts: {}, loadedCount: 0, position: null, total: 0 };
 
-/** Fields a device may change. `seen` and `read` are one-way flags the server turns into timestamps. */
+/** Fields a device may change. `seen`, `read` and `opened` are one-way flags the server turns into timestamps. */
 export type PostPatch = Partial<Pick<PostState, "rating" | "bookmarked" | "expanded">> & {
   seen?: true;
   read?: true;
+  opened?: true;
 };
 
 /** Writes made on this device that the server has not acknowledged yet. */
@@ -80,6 +81,7 @@ function coercePostState(value: unknown): PostState | null {
     firstSeenAt: coerceTimestamp(value.firstSeenAt),
     readAt: coerceTimestamp(value.readAt),
     deeperOpenedAt: coerceTimestamp(value.deeperOpenedAt),
+    openedAt: coerceTimestamp(value.openedAt),
   };
 }
 
@@ -154,7 +156,12 @@ export function coercePost(value: unknown): Post | null {
   if (status === "published" && !sources.length) return null;
   const eventDate = typeof value.eventDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.eventDate)
     && Number.isFinite(Date.parse(value.eventDate)) ? value.eventDate : undefined;
+  const slug = (text: unknown) => (typeof text === "string" && /^[a-z0-9-]{1,60}$/.test(text) ? text : undefined);
+  const umbrella = slug(value.umbrella);
+  const field = slug(value.field);
+  const subtopic = coerceText(value.subtopic, 100) ?? undefined;
   return { id, topic, title, explanation, insight, deeper, publishedAt, status, contentType, sources,
+    ...(umbrella ? { umbrella } : {}), ...(field ? { field } : {}), ...(subtopic ? { subtopic } : {}),
     ...(eventDate ? {eventDate} : {}), ...(source ? { source } : {}) };
 }
 
@@ -180,6 +187,7 @@ function coercePatch(value: unknown): PostPatch | null {
   if (typeof value.expanded === "boolean") patch.expanded = value.expanded;
   if (value.seen === true) patch.seen = true;
   if (value.read === true) patch.read = true;
+  if (value.opened === true) patch.opened = true;
   return Object.keys(patch).length ? patch : null;
 }
 
@@ -232,6 +240,7 @@ export function applyPatch(state: PostState, patch: PostPatch, now: string): Pos
   }
   if (patch.seen) next.firstSeenAt = next.firstSeenAt ?? now;
   if (patch.read) next.readAt = next.readAt ?? now;
+  if (patch.opened) next.openedAt = next.openedAt ?? now;
   return next;
 }
 

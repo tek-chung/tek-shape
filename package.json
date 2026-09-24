@@ -11,6 +11,7 @@
     "test:sql": "node --test \"tests/sql/*.test.mjs\"",
     "test:content": "node --test \"tests/content/*.test.mjs\"",
     "content": "node scripts/content/run.mjs",
+    "signin-link": "node scripts/signin-link.mjs",
     "test:e2e": "playwright test",
     "build:cloudflare": "node scripts/build-cloudflare.mjs",
     "preview:cloudflare": "wrangler dev --ip 127.0.0.1 --port 8787",

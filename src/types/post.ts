@@ -17,6 +17,10 @@ export interface SeedPost {
 export interface Post extends SeedPost {
   publishedAt: string;
   status?: "sample" | "published";
+  /** Where the post sits in the subject map (src/data/taxonomy.json). */
+  umbrella?: string;
+  field?: string;
+  subtopic?: string;
   contentType?: "news" | "evergreen";
   eventDate?: string;
   sources?: { url: string; publisher: string; title: string; articleDate: string | null; accessedAt: string }[];
@@ -28,6 +32,8 @@ export interface PostState {
   firstSeenAt?: string | null;
   readAt?: string | null;
   deeperOpenedAt?: string | null;
+  /** When the reader tapped through to the original article. */
+  openedAt?: string | null;
 }
 export interface ReadingPosition {
   postId: string;

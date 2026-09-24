@@ -19,6 +19,17 @@ export function PrivateApp() {
     const { data } = supabase.auth.onAuthStateChange((_event, next) => {
       if (active) { setSession(next); setLoading(false); }
     });
+    // A link made by `npm run signin-link` (no email sent) carries a one-time token hash. Strip it from the
+    // address straight away so it never lingers in history, then exchange it for a session.
+    const params = new URLSearchParams(window.location.search);
+    const tokenHash = params.get("token_hash");
+    const type = params.get("type");
+    if (tokenHash && (type === "magiclink" || type === "email")) {
+      window.history.replaceState(null, "", window.location.pathname);
+      void supabase.auth.verifyOtp({ token_hash: tokenHash, type }).then(({ error }) => {
+        if (active && error) setMessage("That sign-in link has expired or was already used. Make a new one.");
+      });
+    }
     void supabase.auth.getSession().then(({ data, error }) => {
       if (!active) return;
       setSession(data.session); setLoading(false);
@@ -33,7 +44,10 @@ export function PrivateApp() {
     setBusy(true); setMessage("");
     try {
       const { error } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false, emailRedirectTo: window.location.origin } });
-      setMessage(error ? "We couldn’t send a sign-in link. Check your email address and connection, then try again shortly." : "If this is your authorised account, a sign-in link is on its way. Open it in this browser.");
+      // Supabase's built-in email sender allows only a few emails an hour; say so rather than blame the address.
+      setMessage(!error ? "If this is your authorised account, a sign-in link is on its way. Open it in this browser."
+        : error.status === 429 ? "Too many sign-in emails were requested recently. Wait about an hour, then try again. The last link you received still works if it hasn’t expired."
+        : "We couldn’t send a sign-in link. Check your email address and connection, then try again shortly.");
     } catch { setMessage("Unable to connect. Please try again when you’re online."); }
     finally { setBusy(false); }
   }

@@ -17,13 +17,6 @@
   { "publisher": "engineering.com", "hosts": ["www.engineering.com"], "feeds": ["https://www.engineering.com/feed/"] },
   { "publisher": "TechCrunch", "hosts": ["techcrunch.com"], "feeds": ["https://techcrunch.com/feed/"] },
   { "publisher": "The Learning Scientists", "hosts": ["www.learningscientists.org"], "feeds": ["https://www.learningscientists.org/blog?format=rss"], "skip": "weekly-digest" },
-  {
-    "publisher": "NASA Space Place",
-    "hosts": ["spaceplace.nasa.gov"],
-    "pages": ["https://spaceplace.nasa.gov/", "https://spaceplace.nasa.gov/menu/earth/", "https://spaceplace.nasa.gov/menu/sun/", "https://spaceplace.nasa.gov/menu/solar-system/", "https://spaceplace.nasa.gov/menu/space/", "https://spaceplace.nasa.gov/menu/science-and-technology/"],
-    "match": "^https://spaceplace\\.nasa\\.gov/[a-z0-9-]+/en/$",
-    "skip": "game|art-challenge|glossary|image-use|coloring|craft"
-  },
   { "publisher": "ScienceDaily", "hosts": ["www.sciencedaily.com"], "feeds": ["https://www.sciencedaily.com/rss/all.xml"] },
   { "publisher": "The Marginalian", "hosts": ["www.themarginalian.org"], "feeds": ["https://www.themarginalian.org/feed/"] },
   {
@@ -50,14 +43,6 @@
     "hosts": ["www.fastersmarter.io"],
     "pages": ["https://www.fastersmarter.io/", "https://www.fastersmarter.io/episodes/"],
     "match": "^https://www\\.fastersmarter\\.io/\\d+-[a-z0-9-]+/$"
-  },
-  {
-    "publisher": "Investopedia",
-    "hosts": ["www.investopedia.com"],
-    "feeds": ["https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_headline", "https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_articles"],
-    "pages": ["https://www.investopedia.com/", "https://www.investopedia.com/financial-term-dictionary-4769738"],
-    "match": "^https://www\\.investopedia\\.com/(terms/[a-z0-9]/[a-z0-9-]+\\.asp|[a-z0-9-]+-\\d{7,}|[a-z0-9-]+\\.asp)$",
-    "skip": "about-us|contact|newsletter|sitemap|legal|privacy|terms-of-use|financial-term-dictionary|terms-beginning-with"
   },
   {
     "publisher": "MIT Sloan Management Review",

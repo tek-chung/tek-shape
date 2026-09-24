@@ -180,15 +180,24 @@ test("a full article with an upsell box is kept; a short teaser behind a paywall
   assert.throws(() => extractArticle(page(`${"A short opening paragraph for the story. ".repeat(25)} Subscribe to read the rest.`), "X"), /Paywalled/);
 });
 
-test("Investopedia and MIT SMR link patterns keep articles and drop navigation", async () => {
+test("MIT SMR link pattern keeps articles and drops navigation", async () => {
   const { discoverHTML } = await import("../../scripts/content/sources.mjs");
   const groups = JSON.parse(await (await import("node:fs/promises")).readFile(new URL("../../content-sources.example.json", import.meta.url), "utf8"));
-  const inv = groups.find((g) => g.publisher === "Investopedia");
-  const links = (base, hrefs) => hrefs.map((h) => `<a href="${h}">x</a>`).join("");
-  const found = discoverHTML(links(inv.pages[0], ["/terms/c/compoundinterest.asp", "/how-to-invest-in-bonds-5190237", "/financial-term-dictionary-4769738", "/about-us-5093291", "/news"]), inv.pages[0], inv.hosts, inv.match)
-    .filter((u) => !new RegExp(inv.skip).test(u));
-  assert.deepEqual(found, ["https://www.investopedia.com/terms/c/compoundinterest.asp", "https://www.investopedia.com/how-to-invest-in-bonds-5190237"]);
+  const links = (hrefs) => hrefs.map((h) => `<a href="${h}">x</a>`).join("");
   const smr = groups.find((g) => g.publisher === "MIT Sloan Management Review");
-  assert.deepEqual(discoverHTML(links(smr.pages[0], ["/article/should-your-brand-take-a-stand/", "/topic/leadership/", "/video/x/"]), smr.pages[0], smr.hosts, smr.match),
+  assert.deepEqual(discoverHTML(links(["/article/should-your-brand-take-a-stand/", "/topic/leadership/", "/video/x/"]), smr.pages[0], smr.hosts, smr.match),
     ["https://sloanreview.mit.edu/article/should-your-brand-take-a-stand/"]);
+});
+
+test("each post is filed in the subject map: the field decides the umbrella and the card's topic", async () => {
+  const { FIELD_IDS, placeOf } = await import("../../scripts/content/taxonomy.mjs");
+  const { draftSchema } = await import("../../scripts/content/model.mjs");
+  assert.equal(new Set(FIELD_IDS).size, FIELD_IDS.length, "field IDs are unique across umbrellas");
+  assert.deepEqual(draftSchema.properties.field.enum, FIELD_IDS);
+  assert.equal(placeOf("china-hong-kong").umbrella, "politics-society");
+  const source = { url: "https://p.example/a", publisher: "P", title: "T", articleDate: null, accessedAt: "2026-09-23T10:00:00.000Z", text: "Primes are numbers. They matter.", hash: "h" };
+  const filed = settleDraft({ field: "algebra-number-theory", subtopic: "  Prime gaps. ", topic: "Maths stuff", claims: [], conceptIds: [] }, source);
+  assert.deepEqual([filed.umbrella, filed.field, filed.topic, filed.subtopic], ["mathematics", "algebra-number-theory", "Mathematics", "Prime gaps"]);
+  const unknown = settleDraft({ field: "astrology", subtopic: "", topic: "Science", claims: [], conceptIds: [] }, source);
+  assert.deepEqual([unknown.umbrella, unknown.field, unknown.topic, unknown.subtopic], ["other", "general", "Science", "General"]);
 });

@@ -275,6 +275,38 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
   Paywall guard only rejects pages under 3,000 chars, so an upsell box after a full article no longer
   rejects it. No bot-block or paywall circumvention (no browser spoofing, no archive mirrors).
 
+- Investopedia removed: HTTP 403 on every feed and page (the site refuses automated readers). 25 groups.
+
+- NASA Space Place removed (owner: too elementary). 24 groups.
+
+## 5j. Subject map and knowledge map (26 Sep 2026)
+
+- `src/data/taxonomy.json`: 10 umbrellas (+ Other) → 68 fields; shared by app (`src/lib/taxonomy.ts`) and
+  engine (`scripts/content/taxonomy.mjs`). Drafts now return `field` (schema enum) + free-text `subtopic`;
+  `settleDraft` derives `umbrella` and sets `topic` to the umbrella label. Unknown field → other/general.
+- Migration `202609260001_knowledge_map.sql`: `post.umbrella`/`post.field`, `publish_candidate` and
+  `post_json` carry them, `knowledge_map()` RPC aggregates per (umbrella, field, lower(subtopic)).
+- `npm run content -- classify` files older posts (field = general) with one small AI call each.
+- App: Map tab (`KnowledgeMap.tsx`, `lib/knowledgeMap.ts`): T-shape (breadth band + depth bars), drill to
+  fields, then subtopics, with ratings/deeper counts. Card chip shows field · subtopic.
+- Next (agreed, not started): feedback-driven generation at field/subtopic granularity: skip disliked
+  subtopics before drafting, give well-rated sources more turns, count saves and deeper opens as positive.
+
+## 5k. Taste model and recommender (27 Sep 2026)
+
+- `scripts/content/taste.mjs`: rewards, layered shrinkage estimates, learned pauses, difficulty targets, niches,
+  self-tuning exploration, `rankQueue` (favourite/explore/stretch batches), `planSources`, `judgeTopic`,
+  `promptSummary`, `snapshotOf`. Replaces `selectQueue`/`summarisePreferences` (removed with their tests).
+- Engine: `discover` keeps headlines (`discoverXMLItems`/`discoverHTMLItems`); `draftCandidates` takes `plan`,
+  `triage`, `guidance`; `interleave` honours `turns`. Runner: triage call (`triageSchema`), `prepare` writes
+  `feed_queue.slot` and `taste_snapshot`; `status` prints the report card and niches (local only).
+- Migration `202609270001_taste.sql`: `user_post_state.opened_at` (+ `save_post` `opened`, `reading_state`
+  `openedAt`), `feed_queue.slot`, `topic_preference` + `set_topic_preference`, `taste_snapshot` + `taste_view`.
+- App: "Read the original" sends `opened`; Map shows niches, report card, per-field enjoyment and target
+  difficulty, pauses, and More / Less / Snooze on fields and subtopics.
+- **Order matters**: apply the migrations before deploying; the new app's `opened` patch is rejected by the old
+  `save_post`, which would stall the outbox.
+
 ## 6. Next steps
 
 1. **User:** `npm run lint` and `npm run build`.

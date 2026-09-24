@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkDraft, checkReview, excerptFound, recentConcepts, selectQueue, snapExcerpt, summarisePreferences } from "../../scripts/content/editorial.mjs";
+import { checkDraft, checkReview, excerptFound, recentConcepts, snapExcerpt } from "../../scripts/content/editorial.mjs";
 import { safeURL, publicIPv4, discoverXML, extractArticle, splitSentences } from "../../scripts/content/sources.mjs";
 import { citedExcerpt, draftCandidates, settleDraft, slugs } from "../../scripts/content/engine.mjs";
 import { ModelChainError, generateJSON, liveModels, modelConfig } from "../../scripts/content/model.mjs";
@@ -12,7 +12,6 @@ const {text:unusedText,hash:unusedHash,...citation} = source;
 void unusedText; void unusedHash;
 const draft = {topic:"Science",subtopic:"Physics",title:"Energy",explanation:["A test source describes the conservation of energy."],insight:"Energy",deeper:"A source explanation",contentType:"evergreen",difficulty:2,conceptIds:["energy-conservation"],eventDate:null,articleDate:null,sources:[citation],claims:[{claim:"Energy is conserved",url:source.url,excerpt:"conservation of energy"}]};
 const review = {supported:true,complete:true,misleading:false,claims:[{index:0,supported:true,reason:"The source supports it"}]};
-const post = (id,extra={}) => ({id,topic:"Science",subtopic:"Physics",difficulty:2,concept_ids:[id],status:"published",verification_status:"source_checked",content_type:"evergreen",...extra});
 test("retrieved citations and exact excerpts pass, invented support fails", () => {
   assert.deepEqual(checkDraft(draft,[source],now),[]);
   assert.ok(checkDraft({...draft,claims:[{...draft.claims[0],excerpt:"invented quotation"}]},[source],now).length);
@@ -128,21 +127,6 @@ test("RSS and Atom discovery filter foreign hosts and deduplicate", () => {
 test("extraction strips scripts and navigation and refuses tiny pages", () => {
   assert.ok(!extractArticle({...response,text:`<title>Title</title><nav>NOISE</nav><article>${text}<script>BAD</script></article>`},"Example").text.includes("BAD"));
   assert.throws(()=>extractArticle({...response,text:"<title>T</title><p>Short</p>"},"Example"));
-});
-test("queue keeps assigned posts, removes conceptual repeats and fills unread buffer", () => {
-  const assigned=[post("known")];
-  const selected=selectQueue({assigned,states:[],target:3,candidates:[post("duplicate",{concept_ids:["known"]}),post("new-a"),post("new-b"),post("new-c")]});
-  assert.equal(selected.length,2); assert.ok(!selected.some(p=>p.id==="duplicate")); assert.equal(assigned[0].id,"known");
-  assert.deepEqual(selectQueue({assigned,states:[],target:1,candidates:[post("new")]}),[]);
-});
-test("harder changes future depth; bookmarks do not affect rank", () => {
-  const data={assigned:[post("old")],target:2,candidates:[post("advanced",{difficulty:3}),post("basic",{difficulty:1})]};
-  assert.equal(selectQueue({...data,states:[{post_id:"old",rating:"harder"}]})[0].id,"advanced");
-  assert.deepEqual(selectQueue({...data,states:[]}),selectQueue({...data,states:[{post_id:"old",bookmarked:true}]}));
-});
-test("diversity prefers a new topic and mixes news; stale news is withheld", () => {
-  const selected=selectQueue({assigned:[post("old")],states:[],target:2,now,candidates:[post("a"),post("b",{topic:"History"}),post("stale",{content_type:"news",article_date:"2020-01-01",reviewed_at:new Date(now).toISOString()})]});
-  assert.equal(selected[0].id,"b");
 });
 test("fixture pipeline retrieves, drafts, reviews and stores without publishing", async () => {
   const saved=[]; let calls=0;
@@ -427,13 +411,13 @@ test("a worst-case draft and review each fit Groq's ~8K tokens a minute, output 
   const long = { ...response, text:`<title>${"T".repeat(190)}</title><article>${"lengthy words ".repeat(2000)}</article>` };
   const bigSource = extractArticle(long, "Example");
   const concepts = recentConcepts(Array.from({ length:200 }, (_, i) => ({ id:`p${i}`, published_at:new Date(Date.UTC(2026,0,1)+i*60000).toISOString(), concept_ids:[`a-fairly-long-canonical-concept-${i}`] })));
-  const preferences = Array.from({ length:20 }, (_, i) => ({ topic:"A reasonably long topic", subtopic:`A reasonably long subtopic ${i}`, more:3, harder:2, uninteresting:1, averageDifficulty:2.5 }));
+  const preferences = { enjoys: Array.from({ length:8 }, (_, i) => `A reasonably long field name: a reasonably long subtopic ${i}`), avoids: Array.from({ length:8 }, (_, i) => `A reasonably long field name: a disliked subtopic ${i}`) };
   const { text:_t, hash:_h, ...bigCitation } = bigSource; void _t; void _h;
   // Quotes and citation must genuinely come from the source, or the engine rightly skips the review call.
   const bigDraft = { ...structuredClone(draft), conceptIds:["lengthy-words"], explanation:["x".repeat(1100)], deeper:"y".repeat(1500), sources:[bigCitation],
     claims:Array.from({ length:10 }, () => ({ claim:"c".repeat(150), url:bigSource.url, excerpt:"lengthy words ".repeat(11).trim() })) };
   const prompts = [];
-  await draftCandidates({ groups:[group], retrieve:async()=>long, concepts, preferences,
+  await draftCandidates({ groups:[group], retrieve:async()=>long, concepts, preferences, guidance:()=>({ field:"quantum-physics", targetDifficulty:4.5 }),
     generate:async(args)=>{ prompts.push(args); return prompts.length === 1 ? bigDraft : review; }, save:async()=>{} });
   assert.equal(prompts.length, 2);
   const { maxOutputTokens } = modelConfig(env);
@@ -442,17 +426,6 @@ test("a worst-case draft and review each fit Groq's ~8K tokens a minute, output 
     const inputTokens = Buffer.byteLength(JSON.stringify({ instruction, input, schema })) / 4;
     assert.ok(inputTokens + maxOutputTokens < 8000, `request ~${Math.round(inputTokens + maxOutputTokens)} tokens exceeds 8K`);
   }
-});
-test("ratings are summarised per subtopic, newest first, instead of one entry each", () => {
-  const posts = [{ id:"a", topic:"Science", subtopic:"Physics", difficulty:2 }, { id:"b", topic:"Science", subtopic:"Physics", difficulty:4 }, { id:"c", topic:"History", subtopic:"Rome", difficulty:1 }];
-  const states = [
-    { post_id:"a", rating:"more", updated_at:"2026-09-01T00:00:00Z" }, { post_id:"b", rating:"harder", updated_at:"2026-09-02T00:00:00Z" },
-    { post_id:"c", rating:"uninteresting", updated_at:"2026-09-03T00:00:00Z" }, { post_id:"c", bookmarked:true, rating:null },
-  ];
-  assert.deepEqual(summarisePreferences(states, posts), [
-    { topic:"History", subtopic:"Rome", more:0, harder:0, uninteresting:1, averageDifficulty:1 },
-    { topic:"Science", subtopic:"Physics", more:1, harder:1, uninteresting:0, averageDifficulty:3 },
-  ]);
 });
 
 // --- Engine: continuous running -------------------------------------------------------------

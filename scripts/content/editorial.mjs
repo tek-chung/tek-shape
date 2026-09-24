@@ -110,8 +110,6 @@ export function checkDraft(draft, sources, now = Date.now(), { evidence = true }
   return errors;
 }
 
-const RATINGS = ["more", "harder", "uninteresting"];
-
 /**
  * Concept IDs from the most recently published posts. The full catalogue grows
  * with every post; sending it all would soon overflow a small token allowance.
@@ -128,31 +126,6 @@ export function recentConcepts(posts, limit = 80) {
   return [...seen];
 }
 
-/**
- * Ratings summarised per subtopic, most recently rated first: the same signal
- * the model needs, in a fraction of the tokens of one entry per rating.
- */
-export function summarisePreferences(states, posts, limit = 20) {
-  const byId = new Map(posts.map((post) => [post.id, post]));
-  const groups = new Map();
-  for (const state of states) {
-    const post = byId.get(state.post_id);
-    if (!post || !RATINGS.includes(state.rating)) continue;
-    const key = `${post.topic}\u0000${post.subtopic ?? ""}`;
-    const group = groups.get(key) ?? { topic: post.topic, subtopic: post.subtopic ?? "", more: 0, harder: 0, uninteresting: 0, difficulty: 0, count: 0, latest: 0 };
-    group[state.rating]++;
-    group.difficulty += post.difficulty ?? 1;
-    group.count++;
-    group.latest = Math.max(group.latest, Date.parse(state.updated_at) || 0);
-    groups.set(key, group);
-  }
-  return [...groups.values()]
-    .sort((a, b) => b.latest - a.latest || b.count - a.count)
-    .slice(0, limit)
-    .map(({ topic, subtopic, more, harder, uninteresting, difficulty, count }) =>
-      ({ topic, subtopic, more, harder, uninteresting, averageDifficulty: Math.round((difficulty / count) * 10) / 10 }));
-}
-
 export function candidateId(draft) {
   return `idea-${digest(JSON.stringify(draft)).slice(0,32)}`;
 }
@@ -160,35 +133,4 @@ export function checkReview(review, draft) {
   return review?.supported === true && review?.complete === true && review?.misleading === false
     && Array.isArray(review.claims) && review.claims.length === draft.claims.length
     && review.claims.every((value, index) => value?.index === index && value.supported === true && text(value.reason,1000));
-}
-
-export function selectQueue({ candidates, assigned, states, target = 24, now = Date.now() }) {
-  const stateById = new Map(states.map((s) => [s.post_id,s]));
-  const unread = assigned.filter((p) => !stateById.get(p.id)?.read_at).length;
-  const selected = []; const history = [...assigned];
-  const remaining = candidates.filter((p) => p.status === "published" && p.verification_status === "source_checked" && !assigned.some((a) => a.id === p.id));
-  const known = new Set(assigned.flatMap((p) => p.concept_ids ?? []));
-  while (selected.length < Math.max(0,target - unread)) {
-    const ranked = remaining.filter((p) => p.concept_ids?.length && p.concept_ids.filter((c) => !known.has(c)).length / p.concept_ids.length >= 0.5)
-      .filter((p) => p.content_type !== "news" || (now - Date.parse(p.reviewed_at) < 7 * 86400000
-        && now - Date.parse(p.article_date) < 14 * 86400000 && Date.parse(p.article_date) <= now))
-      .map((p) => {
-        let score = p.concept_ids.filter((c) => !known.has(c)).length / p.concept_ids.length * 5;
-        score -= history.slice(-4).filter((h) => h.topic === p.topic).length * 4;
-        score -= history.slice(-2).filter((h) => h.content_type === p.content_type).length;
-        for (const h of assigned) {
-          if (h.topic !== p.topic) continue;
-          const rating = stateById.get(h.id)?.rating;
-          if (rating === "more") score += p.difficulty === h.difficulty ? 2 : -1;
-          if (rating === "harder") score += p.difficulty > h.difficulty ? 3 : -5;
-          if (rating === "uninteresting" && h.subtopic === p.subtopic) score -= 3;
-        }
-        return { post:p, score };
-      }).sort((a,b) => b.score-a.score || a.post.id.localeCompare(b.post.id));
-    if (!ranked.length) break;
-    const next = ranked[0].post;
-    selected.push(next); history.push(next); next.concept_ids.forEach((id) => known.add(id));
-    remaining.splice(remaining.indexOf(next),1);
-  }
-  return selected;
 }

@@ -1,5 +1,6 @@
 import { providers } from "./providers/index.mjs";
 import { ProviderError } from "./providers/shared.mjs";
+import { FIELD_IDS } from "./taxonomy.mjs";
 
 const string = { type: "string" };
 // The nullable form Gemini documents explicitly; also standard JSON Schema for Groq, Mistral and OpenAI.
@@ -7,7 +8,8 @@ const nullable = { type: ["string", "null"] };
 const array = (items) => ({ type: "array", items });
 const object = (properties) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 export const draftSchema = object({
-  topic:string, subtopic:string, title:string, explanation:array(string), insight:string, deeper:string,
+  // Filed under one field of the fixed subject map; the engine derives the umbrella from it.
+  field:{ type:"string", enum:FIELD_IDS }, subtopic:string, title:string, explanation:array(string), insight:string, deeper:string,
   contentType:{ type:"string", enum:["news","evergreen"] }, difficulty:{ type:"integer" },
   conceptIds:array(string), eventDate:nullable, articleDate:nullable,
   sources:array(object({ url:string, publisher:string, title:string, articleDate:nullable, accessedAt:string })),
@@ -15,6 +17,10 @@ export const draftSchema = object({
   // pointing than at copying, and the evidence is then exact by construction.
   claims:array(object({ claim:string, sentences:array({ type:"integer" }) })),
 });
+/** Triage: file many headlines at once, by their position in the list, before anything is drafted. */
+export const triageSchema = object({ items: array(object({ index:{ type:"integer" }, field:{ type:"string", enum:FIELD_IDS }, subtopic:string })) });
+/** Filing an existing post in the subject map: just the field and subtopic. */
+export const classifySchema = object({ field:{ type:"string", enum:FIELD_IDS }, subtopic:string });
 export const reviewSchema = object({ supported:{type:"boolean"}, complete:{type:"boolean"}, misleading:{type:"boolean"},
   // A few words on what failed, so a held draft can be understood without re-running the review.
   problems:string,

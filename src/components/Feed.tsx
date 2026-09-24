@@ -3,15 +3,16 @@ import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowDown, Bookmark, CheckCheck, Layers2, LockKeyhole, Sprout } from "lucide-react";
+import { ArrowDown, Bookmark, CheckCheck, Layers2, LockKeyhole, Map as MapIcon, Sprout } from "lucide-react";
 import { emptyPost, type PostPatch } from "@/lib/storage";
 import type { ReadingPosition } from "@/types/post";
 import { useReading } from "@/hooks/useReading";
 import { useList } from "@/hooks/useList";
 import { PostCard } from "./PostCard";
+import { KnowledgeMap } from "./KnowledgeMap";
 import { ratingLabels } from "./FeedbackBar";
 
-type View = "feed" | "library" | "read";
+type View = "feed" | "library" | "read" | "map";
 
 export function Feed({
   client,
@@ -132,7 +133,8 @@ export function Feed({
   }, [ready, view, atEnd, posts.length]);
 
   function updatePost(id: string, patch: PostPatch) {
-    savePost(id, patch);
+    // Rating, saving, opening the deeper explanation or the original all show the post was read.
+    savePost(id, state.posts[id]?.readAt ? patch : { ...patch, read: true });
     if (patch.rating !== undefined)
       setAnnouncement(patch.rating ? `${ratingLabels[patch.rating]} recorded.` : "Rating cleared.");
     else if (patch.bookmarked !== undefined)
@@ -218,7 +220,12 @@ export function Feed({
             <CheckCheck size={17} aria-hidden="true" />
             Read
           </button>
+          <button type="button" aria-current={view === "map" ? "page" : undefined} onClick={() => switchView("map")}>
+            <MapIcon size={17} aria-hidden="true" />
+            Map
+          </button>
         </nav>
+        {view === "map" ? <KnowledgeMap client={client} /> : <>
         <div className="feed-heading">
           <h2>{view === "feed" ? "Explore something different" : view === "library" ? "Keep good ideas close" : "Already read"}</h2>
           <span>{view === "feed" ? `${unread} unread` : view === "library" ? `${savedCount} saved` : "newest first"}</span>
@@ -315,6 +322,7 @@ export function Feed({
             )}
           </>
         )}
+        </>}
         <footer>
           Your reading, kept together.
           <br />

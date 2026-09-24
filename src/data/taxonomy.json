@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "umbrellas": [
+    { "id": "mathematics", "label": "Mathematics", "short": "Maths", "fields": [
+      { "id": "algebra-number-theory", "label": "Algebra & number theory" },
+      { "id": "geometry-topology", "label": "Geometry & topology" },
+      { "id": "analysis-calculus", "label": "Analysis & calculus" },
+      { "id": "probability-statistics", "label": "Probability & statistics" },
+      { "id": "logic-foundations", "label": "Logic & foundations" },
+      { "id": "applied-mathematics", "label": "Applied & computational maths" },
+      { "id": "history-of-mathematics", "label": "History of mathematics" }
+    ] },
+    { "id": "physical-sciences", "label": "Physical sciences", "short": "Physics", "fields": [
+      { "id": "fundamental-physics", "label": "Fundamental physics" },
+      { "id": "quantum-physics", "label": "Quantum physics" },
+      { "id": "astronomy-cosmology", "label": "Astronomy & cosmology" },
+      { "id": "planetary-science", "label": "Planets & space exploration" },
+      { "id": "chemistry-materials", "label": "Chemistry & materials" },
+      { "id": "earth-sciences", "label": "Earth sciences" },
+      { "id": "climate-weather", "label": "Climate & weather" }
+    ] },
+    { "id": "life-sciences", "label": "Life sciences", "short": "Life", "fields": [
+      { "id": "genetics-molecular-biology", "label": "Genetics & molecular biology" },
+      { "id": "evolution-palaeontology", "label": "Evolution & palaeontology" },
+      { "id": "ecology-conservation", "label": "Ecology & conservation" },
+      { "id": "animals-plants", "label": "Animals & plants" },
+      { "id": "medicine-health", "label": "Medicine & health" },
+      { "id": "neuroscience", "label": "Neuroscience & the brain" },
+      { "id": "nutrition-fitness", "label": "Nutrition & fitness" }
+    ] },
+    { "id": "technology", "label": "Technology & engineering", "short": "Tech", "fields": [
+      { "id": "artificial-intelligence", "label": "Artificial intelligence" },
+      { "id": "computing-software", "label": "Computing & software" },
+      { "id": "internet-security", "label": "Internet & cybersecurity" },
+      { "id": "engineering-infrastructure", "label": "Engineering & infrastructure" },
+      { "id": "energy-transport", "label": "Energy & transport" },
+      { "id": "robotics-hardware", "label": "Robotics & hardware" },
+      { "id": "tech-industry", "label": "Tech industry & start-ups" }
+    ] },
+    { "id": "mind-behaviour", "label": "Mind & behaviour", "short": "Mind", "fields": [
+      { "id": "cognition-perception", "label": "Cognition & perception" },
+      { "id": "mental-health", "label": "Mental health" },
+      { "id": "wellbeing-mindfulness", "label": "Wellbeing & mindfulness" },
+      { "id": "relationships", "label": "Relationships" },
+      { "id": "learning-memory", "label": "Learning & memory" },
+      { "id": "behavioural-science", "label": "Behavioural science & decisions" },
+      { "id": "personality-development", "label": "Personality & development" }
+    ] },
+    { "id": "economics-business", "label": "Economics & business", "short": "Business", "fields": [
+      { "id": "macroeconomics", "label": "Macroeconomics & policy" },
+      { "id": "markets-investing", "label": "Markets & investing" },
+      { "id": "personal-finance", "label": "Personal finance" },
+      { "id": "corporate-finance", "label": "Corporate finance & accounting" },
+      { "id": "management-leadership", "label": "Management & leadership" },
+      { "id": "strategy-innovation", "label": "Strategy & innovation" },
+      { "id": "work-careers", "label": "Work & careers" }
+    ] },
+    { "id": "politics-society", "label": "Politics & society", "short": "Politics", "fields": [
+      { "id": "geopolitics-diplomacy", "label": "Geopolitics & diplomacy" },
+      { "id": "conflict-security", "label": "Conflict & security" },
+      { "id": "china-hong-kong", "label": "China & Hong Kong" },
+      { "id": "elections-government", "label": "Elections & government" },
+      { "id": "law-rights", "label": "Law & rights" },
+      { "id": "public-policy", "label": "Public policy" },
+      { "id": "society-demographics", "label": "Society & demographics" }
+    ] },
+    { "id": "philosophy-religion", "label": "Philosophy & religion", "short": "Philos.", "fields": [
+      { "id": "ethics", "label": "Ethics" },
+      { "id": "metaphysics-mind", "label": "Metaphysics & philosophy of mind" },
+      { "id": "epistemology-science", "label": "Knowledge & philosophy of science" },
+      { "id": "political-philosophy", "label": "Political philosophy" },
+      { "id": "logic-language", "label": "Logic & language" },
+      { "id": "history-of-philosophy", "label": "History of philosophy" },
+      { "id": "eastern-philosophy", "label": "Eastern philosophy" },
+      { "id": "religion-spirituality", "label": "Religion & spirituality" }
+    ] },
+    { "id": "history-culture", "label": "History & culture", "short": "History", "fields": [
+      { "id": "ancient-medieval-history", "label": "Ancient & medieval history" },
+      { "id": "modern-history", "label": "Modern history" },
+      { "id": "arts-literature", "label": "Arts & literature" },
+      { "id": "language-linguistics", "label": "Language & linguistics" },
+      { "id": "media-journalism", "label": "Media & journalism" },
+      { "id": "ideas-culture", "label": "Ideas & culture" }
+    ] },
+    { "id": "communication-skills", "label": "Communication & skills", "short": "Skills", "fields": [
+      { "id": "public-speaking", "label": "Public speaking" },
+      { "id": "persuasion-negotiation", "label": "Persuasion & negotiation" },
+      { "id": "writing-storytelling", "label": "Writing & storytelling" },
+      { "id": "productivity-habits", "label": "Productivity & habits" },
+      { "id": "study-skills", "label": "Study skills" }
+    ] },
+    { "id": "other", "label": "Other", "short": "Other", "fields": [
+      { "id": "general", "label": "General" }
+    ] }
+  ]
+}

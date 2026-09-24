@@ -118,6 +118,29 @@ reviews the post. `CONTENT_CHECKS=off`: format checks only and no review call �
 claims are not verified; rely on the source link. Concept tags never hold a post: unusable ones fall back
 to the subtopic and topic.
 
+## How the feed learns
+
+All in `scripts/content/taste.mjs` (pure functions; tests in `tests/content/taste.test.mjs`).
+
+1. **One enjoyment score per post**: Not interesting 0 · scrolled past (seen, unread after 24 h) 0.25 · read 0.55 ·
+   deeper explanation 0.75 · More 0.8 · Harder 0.85 · opened the original 0.9 · saved 1. Not interesting wins;
+   otherwise the highest applies.
+2. **Layered estimates** per area → field → subtopic, and per source. Each layer borrows 3 pseudo-posts from the
+   one above, so new subtopics inherit their field's standing. Evidence halves in weight every 60 days.
+3. **Pauses**: a subtopic with 2 Not interesting and nothing positive rests 30 days after the latest dislike; a
+   field only when 3 of its subtopics rest; an area never. Map steering (More / Less / Snooze) overrides.
+4. **Feed batches of 10** (`rankQueue`): favourites by expected enjoyment (difficulty fit, novelty, news age,
+   source); explorations by Thompson sampling, weighted to thin or weak areas, approached through concepts the
+   reader already likes, discounted in comfort-zone areas; one stretch post (an area missing from the last 20,
+   else a harder post where Harder was asked). Exploration share self-tunes between 15% and 30%.
+   Variety: no two in a row from one field, at most 2 of 5 from one area, one per subtopic per batch.
+5. **Upstream**: `planSources` orders sources (overdue first, then sampled enjoyment plus map-gap coverage; the
+   top third get two turns). One **triage** call per run files the next headlines; resting subtopics are
+   skipped before any drafting call, and each source's most promising article is drafted first with its
+   field's target difficulty.
+6. **Report card and niches**: `prepare` records each post's slot and saves a snapshot (`taste_snapshot`) that
+   the Map shows: discovered niches, pauses, per-field enjoyment and the hit rates. `status` prints the same.
+
 ## Publishing
 
 By default nothing reaches your feed without approval:

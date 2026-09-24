@@ -140,36 +140,53 @@ export async function fetchSource(input, hosts, redirects = 0) {
   return { url: url.href, text: response.text, accessedAt: new Date().toISOString() };
 }
 
-export function discoverXML(xml, hosts, limit = 10) {
+/** Feed items with their headline and summary, which the triage call reads before anything is drafted. */
+export function discoverXMLItems(xml, hosts, limit = 10) {
   const parsed = new XMLParser({ ignoreAttributes: false, processEntities: false }).parse(xml);
   // RSS 2.0, Atom, and RSS 1.0 (RDF, used by Nature), where items sit beside the channel, not inside it.
   const rdf = parsed["rdf:RDF"];
   const raw = parsed.rss?.channel?.item ?? parsed.feed?.entry ?? rdf?.item ?? rdf?.channel?.item ?? [];
   const items = Array.isArray(raw) ? raw : [raw];
-  const urls = [];
+  const seen = new Set();
+  const found = [];
   for (const item of items) {
-    const links = Array.isArray(item.link) ? item.link : [item.link];
+    const links = Array.isArray(item?.link) ? item.link : [item?.link];
     const link = links.find((value) => typeof value === "string" || !value?.["@_rel"] || value["@_rel"] === "alternate");
-    try { urls.push(safeURL(typeof link === "string" ? link : link?.["@_href"], hosts).href); } catch { /* Ignore off-site and malformed entries. */ }
+    let url;
+    try { url = safeURL(typeof link === "string" ? link : link?.["@_href"], hosts).href; } catch { continue; /* Off-site or malformed. */ }
+    if (seen.has(url)) continue;
+    seen.add(url);
+    found.push({ url, title: plain(item.title), summary: plain(item.description ?? item.summary ?? item["content:encoded"]).slice(0, 300) });
   }
-  return [...new Set(urls)].slice(0, limit);
+  return found.slice(0, limit);
+}
+export function discoverXML(xml, hosts, limit = 10) { return discoverXMLItems(xml, hosts, limit).map((item) => item.url); }
+
+/** Text from a feed field that may be a string, CDATA object or HTML. */
+function plain(value) {
+  const text = typeof value === "string" ? value : typeof value?.["#text"] === "string" ? value["#text"] : "";
+  return normalise(load(`<div>${text}</div>`)("div").text()).slice(0, 300);
 }
 
 /**
  * For a site with no feed: collect article links from one of its listing pages. `match` (a regular
  * expression) says which links are articles, e.g. "/doc/"; without it every on-site link would qualify.
  */
-export function discoverHTML(html, pageUrl, hosts, match, limit = 10) {
+export function discoverHTMLItems(html, pageUrl, hosts, match, limit = 10) {
   const $ = load(html);
-  const urls = [];
+  const found = new Map();
   $("a[href]").each((_, element) => {
     try {
       const url = safeURL(new URL($(element).attr("href"), pageUrl).href, hosts).href;
-      if (!match || new RegExp(match).test(url)) urls.push(url);
+      if (match && !new RegExp(match).test(url)) return;
+      const title = normalise($(element).text()).slice(0, 200);
+      // The same article is often linked twice (image, then headline); keep the link with the most text.
+      if (!found.has(url) || title.length > found.get(url).title.length) found.set(url, { url, title, summary: "" });
     } catch { /* Off-site, relative junk or javascript: links. */ }
   });
-  return [...new Set(urls)].slice(0, limit);
+  return [...found.values()].slice(0, limit);
 }
+export function discoverHTML(html, pageUrl, hosts, match, limit = 10) { return discoverHTMLItems(html, pageUrl, hosts, match, limit).map((item) => item.url); }
 
 /**
  * Split article text into sentences for citation by number. Deliberately simple: a boundary is terminal
