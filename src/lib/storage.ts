@@ -233,29 +233,56 @@ export const writeOutbox = (userId: string, outbox: Outbox) =>
 export const writePosts = (userId: string, posts: Post[]) =>
   writeLocal(postsKey(userId), JSON.stringify(posts.slice(0, MAX_CACHED_POSTS)));
 
-/** Apply a patch the way `save_post` does, so the optimistic view matches what the server will store. */
-export function applyPatch(state: PostState, patch: PostPatch, now: string): PostState {
+/**
+ * Any control on a post (a rating, saving, the deeper explanation, the original) shows it was read, and
+ * `save_post` records it so. Only `seen` does not.
+ */
+export const marksRead = (patch: PostPatch): boolean =>
+  !!patch.read || !!patch.opened || patch.rating !== undefined || patch.bookmarked !== undefined || patch.expanded !== undefined;
+
+/**
+ * Apply a patch the way `save_post` does, so the optimistic view matches what the server will store.
+ * First times stand. `at` supplies them for a change made earlier on this device (see applyOutbox).
+ */
+export function applyPatch(state: PostState, patch: PostPatch, now: string, at?: PostState): PostState {
   const next: PostState = { ...state };
   if (patch.rating !== undefined) next.rating = patch.rating;
   if (patch.bookmarked !== undefined) next.bookmarked = patch.bookmarked;
   if (patch.expanded !== undefined) {
     next.expanded = patch.expanded;
-    if (patch.expanded) next.deeperOpenedAt = next.deeperOpenedAt ?? now;
+    if (patch.expanded) next.deeperOpenedAt = next.deeperOpenedAt ?? at?.deeperOpenedAt ?? now;
   }
-  if (patch.seen) next.firstSeenAt = next.firstSeenAt ?? now;
-  if (patch.read) next.readAt = next.readAt ?? now;
-  if (patch.opened) next.openedAt = next.openedAt ?? now;
+  if (patch.seen) next.firstSeenAt = next.firstSeenAt ?? at?.firstSeenAt ?? now;
+  if (marksRead(patch)) next.readAt = next.readAt ?? at?.readAt ?? now;
+  if (patch.opened) next.openedAt = next.openedAt ?? at?.openedAt ?? now;
   return next;
+}
+
+/**
+ * Read before `since` (when this sitting began) means "already read": hidden from the feed, listed under
+ * Read. A post rated, saved or opened on an earlier version of the app, which did not yet count that as
+ * reading, has no read time, but it was plainly read in an earlier sitting.
+ */
+export function readBefore(state: ReadingState | null, id: string, since: string): boolean {
+  const post = state?.posts[id];
+  if (!post) return false;
+  // Compare as times: the server and this device write timestamps in different formats.
+  if (post.readAt) return Date.parse(post.readAt) < Date.parse(since);
+  return !!post.rating || post.bookmarked || post.expanded || !!post.deeperOpenedAt || !!post.openedAt;
 }
 
 /** Later writes win per field; `seen` and `read` are sticky because the server only ever sets them once. */
 export const mergePatch = (base: PostPatch | undefined, patch: PostPatch): PostPatch => ({ ...base, ...patch });
 
-/** Replay everything still waiting to sync on top of a server snapshot, so a refresh never discards local work. */
-export function applyOutbox(base: ReadingState, outbox: Outbox, now: string): ReadingState {
+/**
+ * Replay everything still waiting to sync on top of a server snapshot, so a refresh never discards local
+ * work. `local` is this device's own copy, whose times say when things were actually done: a post read
+ * offline an hour ago still counts as read an hour ago, not at this merge, so it moves to Read on time.
+ */
+export function applyOutbox(base: ReadingState, outbox: Outbox, now: string, local?: ReadingState | null): ReadingState {
   const posts = { ...base.posts };
   for (const [id, patch] of Object.entries(outbox.posts)) {
-    posts[id] = applyPatch(posts[id] ?? emptyPost, patch, now);
+    posts[id] = applyPatch(posts[id] ?? emptyPost, patch, now, local?.posts[id]);
   }
   const progress = outbox.progress;
   return {

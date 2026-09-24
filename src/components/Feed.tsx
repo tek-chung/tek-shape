@@ -141,7 +141,8 @@ export function Feed({
   }, [ready, view, atEnd, posts.length]);
 
   function updatePost(id: string, patch: PostPatch) {
-    // Rating, saving, opening the deeper explanation or the original all show the post was read.
+    // Rating, saving, opening the deeper explanation or the original all show the post was read. The server
+    // now records that itself; the explicit flag keeps it so on a database without that migration.
     savePost(id, state.posts[id]?.readAt ? patch : { ...patch, read: true });
     if (patch.rating !== undefined)
       setAnnouncement(patch.rating ? `${ratingLabels[patch.rating]} recorded.` : "Rating cleared.");
@@ -256,7 +257,8 @@ export function Feed({
             difficulty. Bookmark: save independently. Book: open or close the deeper explanation.
           </p>
           <p>
-            Posts you have read move to Read the next time you open T, so your feed starts at something new.
+            Tapping any of the five controls, or opening the original, counts as reading a post. Posts you have
+            read move to Read the next time you open T or tap Refresh, so your feed starts at something new.
             Choose one rating per post; tap it again to clear. Preferences sync privately across your devices and guide
             future queue preparation. Posts already in your queue keep their order.
           </p>

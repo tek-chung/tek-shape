@@ -13,6 +13,7 @@ import {
   initialState,
   mergePatch,
   outboxSize,
+  readBefore,
   readLocal,
   readOutbox,
   readPosts,
@@ -40,12 +41,12 @@ const OFFLINE_NOTICE = "Saved on this device. Your changes will sync when you’
 const LOAD_NOTICE = "Your private feed could not be refreshed. You’re reading the last copy saved on this device.";
 const COLD_NOTICE = "Your private feed could not be loaded. Check your connection and account access, then retry.";
 
-/** Read before this moment means "already read": hidden from the feed, listed under Read. */
-const readBefore = (state: ReadingState | null, id: string, since: string) => {
-  const readAt = state?.posts[id]?.readAt;
-  // Compare as times: the server and this device write timestamps in different formats.
-  return !!readAt && Date.parse(readAt) < Date.parse(since);
-};
+// How long a sync waits for a save already on its way before asking the server what has been read, and how
+// long a feed reload waits for a page already on its way. Both bounded, so a stalled connection cannot
+// hold up a refresh.
+const FLUSH_WAIT_MS = 4_000;
+const PAGE_WAIT_MS = 5_000;
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** Posts that joined the feed after the previous sitting began. */
 export interface Fresh { count: number; firstId: string }
@@ -92,7 +93,11 @@ export function useReading(client: SupabaseClient, userId: string) {
   const loaded = useRef(false);
   const outbox = useRef<Outbox>(emptyOutbox);
   const held = useRef<Post[]>([]);
-  const flushing = useRef(false);
+  // This device's latest view, for merges: its times say when things were done here (see applyOutbox).
+  const latest = useRef<ReadingState>(initialState);
+  // The save pass under way, if any. A sync joins it rather than skipping it, so the server has this
+  // device's latest taps before it is asked what has been read.
+  const flushRun = useRef<Promise<boolean> | null>(null);
   const fetching = useRef(false);
   const failures = useRef(0);
   const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -102,6 +107,7 @@ export function useReading(client: SupabaseClient, userId: string) {
   // Persisting in an effect keeps side effects out of the state updaters below,
   // which React may invoke more than once per render.
   useEffect(() => {
+    latest.current = state;
     if (loaded.current) writeState(userId, state);
   }, [state, userId]);
 
@@ -114,13 +120,12 @@ export function useReading(client: SupabaseClient, userId: string) {
     [userId],
   );
 
-  const flush = useCallback(async (): Promise<boolean> => {
-    if (flushing.current || !outboxSize(outbox.current)) return true;
-    flushing.current = true;
+  /** One save pass: send the outbox until it is empty, a save fails, or the pass limit is reached. */
+  const drain = useCallback(async (): Promise<boolean> => {
     if (active.current) setSyncing(true);
     let failed = false;
 
-    // Taps made mid-pass are blocked from starting their own flush, so drain
+    // Taps made mid-pass join this pass rather than starting their own, so drain
     // repeatedly rather than leaving them until the next poll. Bounded, so a
     // burst of writes can never spin here.
     for (let pass = 0; pass < MAX_PASSES && !failed && outboxSize(outbox.current); pass += 1) {
@@ -152,7 +157,6 @@ export function useReading(client: SupabaseClient, userId: string) {
       }
     }
 
-    flushing.current = false;
     if (!active.current) return !failed;
     setSyncing(false);
 
@@ -170,6 +174,21 @@ export function useReading(client: SupabaseClient, userId: string) {
     }
     return !failed;
   }, [client, commit]);
+
+  /** Send what is waiting. A call made while a pass is under way joins that pass. */
+  const flush = useCallback((): Promise<boolean> => {
+    if (flushRun.current) return flushRun.current;
+    if (!outboxSize(outbox.current)) return Promise.resolve(true);
+    const run = drain();
+    flushRun.current = run;
+    const done = (ok: boolean) => {
+      if (flushRun.current === run) flushRun.current = null;
+      // A tap that landed after the pass's last round goes now, not at the next poll.
+      if (ok && active.current && outboxSize(outbox.current)) void flushLater.current?.();
+    };
+    run.then(done, () => done(false));
+    return run;
+  }, [drain]);
 
   useEffect(() => {
     flushLater.current = flush;
@@ -225,6 +244,9 @@ export function useReading(client: SupabaseClient, userId: string) {
    */
   const rebuild = useCallback(
     async (merged: ReadingState) => {
+      // A page already on its way lands first; then the feed reloads from the start. Only a stalled page
+      // puts the reload off to the next sync.
+      for (let waited = 0; fetching.current && waited < PAGE_WAIT_MS; waited += 100) await pause(100);
       if (fetching.current) {
         needsRebuild.current = true;
         return;
@@ -257,8 +279,12 @@ export function useReading(client: SupabaseClient, userId: string) {
         ok = false;
       } finally {
         if (active.current) {
-          // Offline or a failed page: keep the copy on this device, and try the full reload again next sync.
-          if (!ok) needsRebuild.current = true;
+          // Offline or a failed page: keep the copy on this device, say so, and try the full reload again
+          // next sync. (Reads made before this sitting still leave the feed, below.)
+          if (!ok) {
+            needsRebuild.current = true;
+            setError((previous) => (previous === OFFLINE_NOTICE ? previous : LOAD_NOTICE));
+          }
           const next = (ok ? list : held.current).filter((post) => !readBefore(merged, post.id, since));
           held.current = next;
           setPosts(next);
@@ -305,7 +331,7 @@ export function useReading(client: SupabaseClient, userId: string) {
         setError((previous) => (previous === OFFLINE_NOTICE ? previous : loaded.current ? LOAD_NOTICE : COLD_NOTICE));
         return false;
       }
-      const merged = applyOutbox(server, outbox.current, new Date().toISOString());
+      const merged = applyOutbox(server, outbox.current, new Date().toISOString(), latest.current);
       setState(merged);
       loaded.current = true;
       setReady(true);
@@ -333,8 +359,9 @@ export function useReading(client: SupabaseClient, userId: string) {
 
   const sync = useCallback(
     async (restorePosition = false) => {
-      // Push first, so the snapshot pulled back already reflects this device.
-      await flush();
+      // Push first, waiting briefly for a save already on its way, so the snapshot pulled back already
+      // reflects this device. Anything still unsent is replayed on top of it with its own times.
+      await Promise.race([flush(), pause(FLUSH_WAIT_MS)]);
       await refresh(restorePosition);
     },
     [flush, refresh],

@@ -325,6 +325,24 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
   since)` returns unread, arrivals and firstArrival. SQL tests in `tests/sql/taste.test.mjs` (49 SQL pass).
 - Playwright: "Refresh moves posts read earlier to Read" added (not run here).
 
+## 5m. Controls count as reading, everywhere (24 Sep 2026)
+
+- Bug seen on the phone: posts rated on an earlier build (before "any icon counts as read") had no
+  `read_at`, so Refresh left them in the feed. Migration `202609290001_controls_mark_read.sql`:
+  `save_post` sets `read_at` for any of rating / bookmarked / expanded / opened / read (not `seen`), and
+  backfills `read_at = least(updated_at, deeper_opened_at, opened_at)` for touched rows without one.
+  Idempotent. Tests: `tests/sql/controls-read.test.mjs` (53 SQL pass).
+- Client (`src/lib/storage.ts`): `applyPatch` mirrors that rule (`marksRead`); `readBefore` moved here and
+  treats a touched post with no read time as read in an earlier sitting (covers a database without 0929);
+  `applyOutbox(..., local)` keeps this device's own times for unsynced changes, so a post read offline
+  moves to Read at the next sitting instead of being re-stamped at each merge (the 5l claim was wrong
+  without this).
+- `useReading`: `flush` joins a pass already under way (sync waits up to 4 s for it) and sends late taps
+  straight after; `rebuild` waits up to 5 s for a page in flight instead of deferring to the next poll;
+  a failed rebuild now shows the "could not be refreshed" notice rather than failing silently (a missing
+  `feed_page` migration used to look like a stale feed).
+- New `npm run test:client` (Node type stripping, no new dependencies): `tests/client/storage.test.mjs`.
+
 ## 6. Next steps
 
 1. **User:** `npm run lint` and `npm run build`.

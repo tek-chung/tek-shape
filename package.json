@@ -10,6 +10,7 @@
     "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed-content.mjs",
     "test:sql": "node --test \"tests/sql/*.test.mjs\"",
     "test:content": "node --test \"tests/content/*.test.mjs\"",
+    "test:client": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --test \"tests/client/*.test.mjs\"",
     "content": "node scripts/content/run.mjs",
     "signin-link": "node scripts/signin-link.mjs",
     "test:e2e": "playwright test",

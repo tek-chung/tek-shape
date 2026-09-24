@@ -13,10 +13,11 @@ async function testUserId() {
   return users.find((user) => user.email === "playwright@tek-shape.test")!.id;
 }
 
-// Read posts leave the feed on the next visit, and cards on screen for five seconds count as read, so
-// start every test with nothing read; otherwise the first card would differ from test to test.
+// Read posts leave the feed on the next visit, and cards on screen for five seconds or touched by any
+// control count as read, so start every test with a clean slate (test account, disposable project);
+// otherwise the first card would differ from test to test.
 test.beforeEach(async () => {
-  await admin.from("user_post_state").update({ read_at: null }).eq("user_id", await testUserId());
+  await admin.from("user_post_state").delete().eq("user_id", await testUserId());
 });
 
 /** The feed is ready once the first page of content has arrived. */
@@ -41,6 +42,7 @@ test("signs in from stored session and shows the first page", async ({ page }) =
 
 test("ratings are exclusive, bookmarks are independent, and both survive a reload", async ({ page }) => {
   await openFeed(page);
+  const first = await card(page).getAttribute("id");
   await control(page, "More at the same level").click();
   await control(page, "Save post").click();
   await control(page, "Not interesting").click();
@@ -51,11 +53,30 @@ test("ratings are exclusive, bookmarks are independent, and both survive a reloa
   await expect(control(page, "Remove bookmark")).toHaveAttribute("aria-pressed", "true");
   await expect(card(page, 1).locator('[aria-pressed="true"]')).toHaveCount(0);
 
-  // Wait for the outbox to drain, so the reload reads it back from Supabase.
+  // Rated and saved in this sitting, so it stays put until the next one.
+  await expect(card(page)).toHaveAttribute("id", first!);
+
+  // Wait for the outbox to drain, so the reload reads it back from Supabase. Touching a control counts as
+  // reading, so after the reload the post has left the feed; the Library shows it with both choices kept.
   await expect(page.getByText("Saved to your account")).toBeVisible();
   await page.reload();
-  await expect(control(page, "Keep the topic, increase difficulty")).toHaveAttribute("aria-pressed", "true");
-  await expect(control(page, "Remove bookmark")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "Explore something different" })).toBeVisible();
+  await expect(page.locator(`article[id="${first}"]`)).toHaveCount(0);
+  await page.getByRole("button", { name: "Library" }).click();
+  const saved = page.locator(`article[id="${first}"]`);
+  await expect(saved.getByRole("button", { name: "Keep the topic, increase difficulty", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(saved.getByRole("button", { name: "Remove bookmark", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("a post rated on an older app, with no read time recorded, leaves the feed on Refresh", async ({ page }) => {
+  await openFeed(page);
+  const first = await card(page).getAttribute("id");
+  // As an older version of the app left it: rated, but never marked read.
+  await admin
+    .from("user_post_state")
+    .upsert({ user_id: await testUserId(), post_id: first!, rating: "harder", read_at: null }, { onConflict: "user_id,post_id" });
+  await page.getByRole("button", { name: /Refresh/ }).click();
+  await expect(page.locator(`article[id="${first}"]`)).toHaveCount(0);
 });
 
 test("the deeper explanation opens only on its own post", async ({ page }) => {
