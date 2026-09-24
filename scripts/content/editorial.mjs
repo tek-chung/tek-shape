@@ -107,6 +107,38 @@ export function checkDraft(draft, sources, now = Date.now(), { evidence = true }
   }
   // Generated links are never accepted merely because the model produced them.
   if (!Array.isArray(draft.sources) || !draft.sources.length || draft.sources.some((s) => !s || !sources.some((known) => known.url === s.url && known.publisher === s.publisher && known.title === s.title && known.articleDate === s.articleDate && known.accessedAt === s.accessedAt))) errors.push("Citations must match retrieved sources");
+  if (draft.body !== undefined && !validBlocks(draft.body)) errors.push("Invalid saved article");
+  return errors;
+}
+
+/** A saved article body (see feedBlocks): plain text blocks only, within the database's size limits. */
+export function validBlocks(body) {
+  if (!Array.isArray(body) || !body.length || body.length > 300 || JSON.stringify(body).length > 150_000) return false;
+  const strings = (list, count, max) => Array.isArray(list) && list.length >= 1 && list.length <= count && list.every((s) => typeof s === "string" && s.length <= max);
+  return body.every((block) => block && typeof block === "object" && (
+    (["h", "p", "q"].includes(block.t) && text(block.text, 4000) && Object.keys(block).length === 2)
+    || (["ul", "ol"].includes(block.t) && strings(block.items, 50, 4000) && Object.keys(block).length === 2)
+    || (block.t === "table" && Array.isArray(block.rows) && block.rows.length >= 1 && block.rows.length <= 40 && block.rows.every((row) => strings(row, 12, 300)) && Object.keys(block).length === 2)));
+}
+
+/**
+ * An excerpt: made without AI, from the publisher's own words — its feed summary or the first paragraph of
+ * the page — with the link. No claims to check, so only the format the database needs, a real source, and
+ * (for news) a recent date.
+ */
+export function checkExcerpt(post, now = Date.now()) {
+  if (!post || typeof post !== "object" || post.kind !== "excerpt") return ["Not an excerpt"];
+  const errors = [];
+  for (const [key, max] of Object.entries({ topic: 60, subtopic: 100, title: 200 })) if (!text(post[key], max)) errors.push(`Invalid ${key}`);
+  if (!Array.isArray(post.explanation) || post.explanation.length !== 1 || !text(post.explanation[0], 1200)) errors.push("Invalid excerpt");
+  if (post.insight !== null || post.deeper !== null) errors.push("An excerpt has no insight or deeper explanation");
+  if (!["news", "evergreen"].includes(post.contentType)) errors.push("Invalid content type");
+  if (!Number.isInteger(post.difficulty) || post.difficulty < 1 || post.difficulty > 5) errors.push("Invalid difficulty");
+  if (!Array.isArray(post.conceptIds) || post.conceptIds.length < 1 || post.conceptIds.length > 8 || post.conceptIds.some((c) => !slug.test(c))) errors.push("Invalid canonical concepts");
+  if (post.contentType === "news" && (!iso(post.articleDate) || Date.parse(post.articleDate) > now || now - Date.parse(post.articleDate) > 14 * 86400000)) errors.push("News needs a recent article date");
+  const source = Array.isArray(post.sources) && post.sources.length === 1 ? post.sources[0] : null;
+  if (!source || !text(source.url, 2000) || !source.url.startsWith("https://") || !text(source.publisher, 200) || !text(source.title, 200) || !iso(source.accessedAt)) errors.push("An excerpt needs its one source");
+  if (post.body !== undefined && !validBlocks(post.body)) errors.push("Invalid saved article");
   return errors;
 }
 

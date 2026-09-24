@@ -1,5 +1,5 @@
-import { candidateId, checkDraft, checkReview, snapExcerpt } from "./editorial.mjs";
-import { ANY_HOST, discoverHTMLItems, discoverXMLItems, extractArticle, fetchSource, safeURL, splitSentences } from "./sources.mjs";
+import { candidateId, checkDraft, checkExcerpt, checkReview, snapExcerpt } from "./editorial.mjs";
+import { ANY_HOST, blocksText, digest, discoverHTMLItems, discoverXMLItems, extractArticle, feedBlocks, fetchSource, pageExcerpt, plainTitle, safeURL, splitSentences } from "./sources.mjs";
 import { ModelChainError, draftSchema, reviewSchema } from "./model.mjs";
 import { TAXONOMY_PROMPT, cleanSubtopic, placeOf } from "./taxonomy.mjs";
 
@@ -51,6 +51,21 @@ function pattern(value, name, publisher) {
  *   skip       optional regular expression for article URLs to ignore, e.g. "/video/|/liveblog/"
  *   openHosts  true for link aggregators such as Hacker News, whose feed points at other sites:
  *              those articles may come from any public HTTPS host
+ *   keepBody   true to save the article body the feed carries, for reading in the app when the site is
+ *              behind a sign-in or subscription; if the page itself is gated, the post is drafted from it
+ *
+ * Excerpt sources, for publishers whose terms rule out AI use: nothing is sent to a model, not even the
+ * headline. The post is the publisher's own words (the first paragraph of the feed's article, its summary,
+ * or the page's first paragraph) with the link.
+ *   mode       "excerpt"
+ *   field      the subject-map field posts are filed under, unless a rule says otherwise
+ *   fieldRules [{ "category": "Space", "field": "astronomy-cosmology" }, { "url": "/pages/4[4-7]-", "field": … }]:
+ *              the first rule matching one of the item's feed categories, or its URL, wins; a rule may
+ *              also set the `subtopic`
+ *   subtopic   the subtopic for the source's posts when no rule sets one (else from categories or headings)
+ *   excerptFrom "description" to show the page's own one-line description rather than its first
+ *              paragraph (for newsletters whose opening paragraphs are sponsor messages)
+ *   perRun     new excerpts per run (default 3); contentType "news" or "evergreen"; licence shown on the card
  */
 export function validateSources(config) {
   if (!Array.isArray(config) || !config.length || config.length > 30) throw new Error("Configure 1–30 source groups");
@@ -69,6 +84,25 @@ export function validateSources(config) {
     pattern(group.skip, "skip", publisher);
     for (const url of [...feeds, ...pages]) safeURL(url, group.hosts);
     for (const url of articles) safeURL(url, group.openHosts ? ANY_HOST : group.hosts);
+    if (group.keepBody !== undefined && typeof group.keepBody !== "boolean") throw new Error(`${publisher}: keepBody must be true or false`);
+    if (group.mode !== undefined && group.mode !== "excerpt") throw new Error(`${publisher}: mode must be "excerpt" when set`);
+    const known = (id) => typeof id === "string" && placeOf(id).field === id;
+    if (group.mode === "excerpt") {
+      if (!known(group.field)) throw new Error(`${publisher}: excerpt sources need a "field" from the subject map`);
+      if (group.openHosts) throw new Error(`${publisher}: excerpt sources cannot use openHosts`);
+    } else if (["field", "fieldRules", "perRun", "licence", "contentType", "subtopic", "excerptFrom"].some((key) => group[key] !== undefined)) {
+      throw new Error(`${publisher}: field, fieldRules, subtopic, excerptFrom, perRun, licence and contentType apply to excerpt sources only`);
+    }
+    const label = (value) => value === undefined || (typeof value === "string" && value.trim().length > 0 && value.length <= 60);
+    if (group.fieldRules !== undefined && (!Array.isArray(group.fieldRules) || group.fieldRules.length > 40
+      || group.fieldRules.some((rule) => !rule || !known(rule.field) || (typeof rule.category === "string") === (typeof rule.url === "string")
+        || !label(rule.subtopic) || (rule.url !== undefined && !pattern(rule.url, "fieldRules url", publisher)))))
+      throw new Error(`${publisher}: fieldRules must be up to 40 rules, each with a known field, either a category or a url pattern, and an optional short subtopic`);
+    if (!label(group.subtopic)) throw new Error(`${publisher}: subtopic must be a short label`);
+    if (group.excerptFrom !== undefined && !["paragraph", "description"].includes(group.excerptFrom)) throw new Error(`${publisher}: excerptFrom must be "paragraph" or "description"`);
+    if (group.perRun !== undefined && (!Number.isInteger(group.perRun) || group.perRun < 1 || group.perRun > 10)) throw new Error(`${publisher}: perRun must be 1 to 10`);
+    if (group.licence !== undefined && (typeof group.licence !== "string" || !group.licence.trim() || group.licence.length > 80)) throw new Error(`${publisher}: licence must be a short label`);
+    if (group.contentType !== undefined && !["news", "evergreen"].includes(group.contentType)) throw new Error(`${publisher}: contentType must be news or evergreen`);
   }
   return config;
 }
@@ -89,7 +123,7 @@ export async function discover(group, retrieve, onFailure) {
   const linkHosts = group.openHosts ? ANY_HOST : group.hosts;
   const items = listOf(group.articles).map((url) => ({ url, title: "", summary: "" }));
   for (const feed of listOf(group.feeds)) {
-    try { items.push(...discoverXMLItems((await retrieve(feed, group.hosts)).text, linkHosts, 20)); } catch (error) { onFailure(failureReason(error)); }
+    try { items.push(...discoverXMLItems((await retrieve(feed, group.hosts)).text, linkHosts, 20, { bodies: group.keepBody === true })); } catch (error) { onFailure(failureReason(error)); }
   }
   // Listing pages (an encyclopedia's contents, say) get a far longer reach than feeds: already-drafted links are
   // skipped for free, so later chapters are reached on later runs.
@@ -98,9 +132,10 @@ export async function discover(group, retrieve, onFailure) {
   }
   const match = pattern(group.match, "match", group.publisher);
   const skip = pattern(group.skip, "skip", group.publisher);
-  // Headlines and summaries, kept for the triage call; the first mention of a URL wins.
+  // Headlines and summaries, kept for the triage call (and, for excerpts and saved articles, the rest of what
+  // the feed said); the first mention of a URL wins.
   const titles = new Map();
-  for (const item of items) if (!titles.has(item.url)) titles.set(item.url, { title: item.title, summary: item.summary });
+  for (const { url, ...details } of items) if (!titles.has(url)) titles.set(url, details);
   const urls = [...titles.keys()].filter((url) => (!match || match.test(url)) && (!skip || !skip.test(url)));
   return { linkHosts, urls, titles };
 }
@@ -136,19 +171,40 @@ export const publisherOf = (group, url) =>
 export async function draftCandidates({ groups, generate, save, concepts = [], preferences = [], retrieve = fetchSource, limit = 4, known = new Set(), sourceChars = 10000, checks = "strict", onProgress = () => {},
   plan = null, triage = null, guidance = () => undefined }) {
   validateSources(groups);
-  const metrics = { discovered:0, retrieved:0, checked:0, held:0, sourceFailures:0, alreadyDrafted:0, modelFailures:0, stopped:null, triaged:0, skippedByTaste:0 };
+  const metrics = { discovered:0, retrieved:0, checked:0, held:0, sourceFailures:0, alreadyDrafted:0, modelFailures:0, stopped:null, triaged:0, skippedByTaste:0, excerpts:0 };
   const seen = new Set();
   // Progress carries publisher names and outcomes only — never article text — since CI logs are public.
   const report = (publisher, outcome) => onProgress({ n: metrics.retrieved, limit, publisher, outcome });
   // Sources in the order (and with the turns) the taste model asks for; otherwise as configured.
   const planned = plan ? plan(groups) : groups.map((group) => ({ group, turns: 1 }));
   let lists = [];
+  // What each feed said about each article: its summary, categories and, where kept, its body.
+  const details = new Map();
   for (const { group, turns } of planned) {
     const found = await discover(group, retrieve, (why) => { metrics.sourceFailures++; report(group.publisher, `feed unreachable (${why})`); });
     const fresh = found.urls.filter((url) => !known.has(url));
     metrics.alreadyDrafted += found.urls.length - fresh.length;
+    for (const [url, item] of found.titles) if (!details.has(url)) details.set(url, item);
     lists.push({ group, turns, ...found, urls: fresh });
   }
+  // Excerpt sources first: they cost no AI quota, so a run that later runs out of quota still brings them in.
+  // They never reach triage or a model.
+  for (const list of lists.filter((l) => l.group.mode === "excerpt")) {
+    let taken = 0;
+    for (const url of list.urls) {
+      if (taken >= (list.group.perRun ?? 3)) break;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      try {
+        const candidate = await excerptCandidate({ group: list.group, url, item: details.get(url) ?? {}, retrieve, hosts: list.linkHosts });
+        if (!candidate) { metrics.sourceFailures++; continue; }
+        await save(candidate);
+        metrics.excerpts++; taken++;
+        report(list.group.publisher, `saved an excerpt${candidate.payload.body ? " with the full text" : ""}`);
+      } catch { metrics.sourceFailures++; }
+    }
+  }
+  lists = lists.filter((l) => l.group.mode !== "excerpt");
   // Triage: one call files the next few headlines of every source, so resting subtopics are skipped before a
   // drafting call is spent on them, and each source's most promising article goes first.
   const predicted = new Map();
@@ -171,14 +227,20 @@ export async function draftCandidates({ groups, generate, save, concepts = [], p
     seen.add(url);
     if (known.has(url)) { metrics.alreadyDrafted++; continue; }
     metrics.discovered++;
+    // The article as the feed carried it, for reading in the app (and to draft from if the page is gated).
+    const item = details.get(url) ?? {};
+    const body = group.keepBody && item.body ? keepable(feedBlocks(item.body)) : null;
     let source;
     try { source = extractArticle(await retrieve(url,hosts),publisherOf(group, url),sourceChars); }
-    catch { metrics.sourceFailures++; continue; }
+    catch {
+      if (!body) { metrics.sourceFailures++; continue; }
+      source = feedSource({ url, publisher: publisherOf(group, url), title: item.title, articleDate: item.published ?? null }, body, sourceChars);
+    }
     // A redirect can land on a URL drafted under a different link; check again before paying.
     if (source.url !== url && known.has(source.url)) { metrics.alreadyDrafted++; continue; }
     metrics.retrieved++;
     try {
-      const errors = await draftOne({ source, concepts, preferences, generate, save, metrics, checks, guidance: guidance(predicted.get(url)) });
+      const errors = await draftOne({ source, concepts, preferences, generate, save, metrics, checks, guidance: guidance(predicted.get(url)), body });
       // Our own check messages only, deduplicated — never text from the article or the draft.
       report(group.publisher, errors.length ? `held: ${[...new Set(errors)].join("; ")}` : "passed checks");
     } catch (error) {
@@ -284,26 +346,108 @@ function settleEventDate(value) {
 }
 
 /** Draft one source, check it deterministically, then have a second call review it. */
-async function draftOne({ source, concepts, preferences, generate, save, metrics, checks = "strict", guidance }) {
+async function draftOne({ source, concepts, preferences, generate, save, metrics, checks = "strict", guidance, body = null }) {
   const strict = checks !== "off";
   const { sentences, view } = modelSource(source);
   const draft = settleDraft(await generate({ schema:draftSchema,
     instruction:DRAFT_INSTRUCTION,
     input:{ source:view, concepts, preferences, ...(guidance ? { guidance } : {}) } }), source, sentences, guidance?.field);
+  // The saved article travels with the post but is never part of what the model sees or is checked on.
+  if (body && draft && typeof draft === "object") draft.body = body;
   const errors = checkDraft(draft,[source],Date.now(),{ evidence: strict });
   let review = null;
   // Deterministic checks run first, so a draft with bad evidence never costs a review call. With checks
   // off there is no review call at all, which also halves the AI calls per post.
   if (strict && !errors.length) {
+    // The reviewer checks the post, not the saved article that rides along with it.
+    const { body: _saved, ...post } = draft; void _saved;
     review = await generate({ schema:reviewSchema,
       instruction:REVIEW_INSTRUCTION,
-      input:{ source, draft } });
+      input:{ source, draft: post } });
     if (!checkReview(review,draft)) errors.push("Editorial reviewer rejected support, coverage or framing");
   }
   const passed = !errors.length;
   await save({ id:candidateId(draft), payload:draft, evidence:[source], checks:{ passed, errors, review, mode: strict ? "strict" : "off" }, status:passed ? "checked" : "held" });
   metrics[passed ? "checked" : "held"]++;
   return errors;
+}
+
+/** Enough of a feed's article to be worth reading in the app: at least 1,200 characters of text. */
+const keepable = (blocks) => (blocks.length && blocksText(blocks).length >= 1200 ? blocks : null);
+
+/** A source built from the feed's copy of an article, for when the page itself is gated. */
+function feedSource(citation, blocks, maxChars) {
+  const text = blocksText(blocks).replace(/\s+/g, " ").trim().slice(0, maxChars);
+  return { ...citation, title: (citation.title || "Untitled").slice(0, 200), accessedAt: new Date().toISOString(), text, hash: digest(text) };
+}
+
+/** Trim to a whole sentence within `max` characters where possible. */
+function trimmed(value, max) {
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max);
+  const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "), cut.lastIndexOf("! "));
+  return end > max / 2 ? cut.slice(0, end + 1) : `${cut.slice(0, max - 1).trimEnd()}…`;
+}
+
+/** The article's opening: its first paragraph, with the next one too if the first is only a line. */
+function leadParagraph(blocks) {
+  let text = "";
+  for (const block of blocks) {
+    if (block.t !== "p") { if (text) break; continue; }
+    text = text ? `${text} ${block.text}` : block.text;
+    if (text.length >= 120) break;
+  }
+  return text.length >= 80 ? trimmed(text, 1200) : null;
+}
+
+// Feed categories that say what kind of item it is rather than what it is about.
+const GENERIC_CATEGORIES = /^(app|summary|opinion|featured|news|uncategori[sz]ed|subscriber-only stories|the download|roundtables|podcasts?|video|audio)$/i;
+
+/**
+ * An excerpt, made without AI: the publisher's own words with the link. The opening of the feed's article if
+ * it carried one, else the feed's summary, else the first paragraph of the page. Filed by the source's rules,
+ * not by a model. Returns null when there is nothing usable.
+ */
+async function excerptCandidate({ group, url, item, retrieve, hosts, now = Date.now() }) {
+  const body = group.keepBody && item.body ? keepable(feedBlocks(item.body)) : null;
+  let title = plainTitle(item.title ?? "");
+  let articleDate = item.published ?? null;
+  let paragraph = body ? leadParagraph(body) : null;
+  if (!paragraph && (item.description ?? "").length >= 80) paragraph = trimmed(item.description, 1200);
+  const fromPage = !paragraph;
+  if (fromPage) {
+    const page = pageExcerpt(await retrieve(url, hosts));
+    // A newsletter's opening paragraphs are often a sponsor's; its own one-line description never is.
+    paragraph = group.excerptFrom === "description" ? (page.description.length >= 20 ? page.description : null) : page.paragraph;
+    title = title || page.title;
+    articleDate = articleDate ?? page.articleDate;
+  }
+  if (!paragraph || !title) return null;
+  const categories = item.categories ?? [];
+  const rules = group.fieldRules ?? [];
+  const rule = rules.find((r) => r.category && categories.some((c) => c.toLowerCase() === r.category.toLowerCase()))
+    ?? rules.find((r) => r.url && new RegExp(r.url).test(url));
+  const place = placeOf(rule?.field ?? group.field);
+  // The subtopic: the rule's or the source's own if set; else the most specific feed category left once the
+  // ones that chose the field are set aside; for a page (a textbook section), its own heading.
+  const ruled = new Set(rules.filter((r) => r.category).map((r) => r.category.toLowerCase()));
+  const specific = rule?.subtopic ?? group.subtopic ?? (fromPage ? title : categories.find((c) => !ruled.has(c.toLowerCase()) && !GENERIC_CATEGORIES.test(c) && c.toLowerCase() !== place.fieldLabel.toLowerCase()));
+  const subtopic = cleanSubtopic(specific ?? "").slice(0, 60) || place.fieldLabel;
+  // Like drafted posts, news is only news while it is recent.
+  const fresh = articleDate && now - Date.parse(articleDate) <= 14 * 86_400_000 && Date.parse(articleDate) <= now;
+  const contentType = (group.contentType ?? (articleDate ? "news" : "evergreen")) === "news" && fresh ? "news" : "evergreen";
+  const accessedAt = new Date(now).toISOString();
+  const citation = { url, publisher: group.publisher, title: title.slice(0, 200), articleDate, accessedAt,
+    ...(item.author ? { author: item.author } : {}), ...(group.licence ? { licence: group.licence } : {}) };
+  const payload = {
+    kind: "excerpt", title: title.slice(0, 200), explanation: [paragraph], insight: null, deeper: null,
+    topic: place.umbrellaLabel, umbrella: place.umbrella, field: place.field, subtopic, contentType, difficulty: 1,
+    conceptIds: slugs([subtopic, place.fieldLabel]).slice(0, 3), eventDate: null, articleDate, sources: [citation],
+    ...(body ? { body } : {}),
+  };
+  if (checkExcerpt(payload, now).length) return null;
+  return { id: candidateId(payload), payload, evidence: [{ ...citation, text: paragraph, hash: digest(paragraph) }],
+    checks: { passed: true, errors: [], review: null, mode: "excerpt" }, status: "checked" };
 }
 
 

@@ -35,6 +35,18 @@ Group options (at most 30 groups, 20 feeds, pages and articles each):
   drops paywalled papers; Al Jazeera `"/video/|/liveblog/"` drops stubs.
 - `openHosts: true`: for aggregators (Hacker News) whose links go to any site. Linked articles still need
   HTTPS and a public address, and are credited as "site (via Hacker News)".
+- `keepBody: true`: save the article body the feed carries (as plain text blocks) so it can be read in the
+  app under "Read the full article here", for sites behind a sign-in or subscription. If the page itself
+  is gated, the post is drafted from the feed's copy. Used for MIT Sloan Management Review.
+- `mode: "excerpt"`: for publishers whose terms rule out AI use (MIT Technology Review, OpenStax). Nothing
+  from these sources is sent to a model, not even headlines for triage. The post is the publisher's own
+  words — the article's opening paragraph from the feed, else the feed summary, else the page's first
+  paragraph — with the link, and no insight or deeper explanation. Filed by `field` and `fieldRules`
+  (feed category or URL pattern → field), at most `perRun` (default 3) per run. A feed `feeds` entry may
+  also be a sitemap (OpenStax lists each book's sections in one, in book order). `licence` is shown on
+  the card. `excerptFrom: "description"` shows the page's own one-line description instead of its first
+  paragraph, for newsletters that open with a sponsor message (CFO Secrets, included on the owner's
+  express permission from the publisher). `subtopic` sets one for the source, or per rule.
 
 Articles are taken one per publisher in turn, so no single feed crowds out the rest; with more groups
 than `CONTENT_DRAFT_LIMIT`, each run covers the next publishers. Pages that show a subscriber teaser, or

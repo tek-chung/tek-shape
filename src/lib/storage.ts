@@ -1,4 +1,4 @@
-import type { Post, PostSource, PostState, Rating, ReadingPosition, ReadingState } from "@/types/post";
+import type { BodyBlock, Post, PostSource, PostState, Rating, ReadingPosition, ReadingState } from "@/types/post";
 
 export const emptyPost: PostState = { rating: null, bookmarked: false, expanded: false };
 export const initialState: ReadingState = { posts: {}, loadedCount: 0, position: null, total: 0 };
@@ -132,10 +132,12 @@ export function coercePost(value: unknown): Post | null {
   const id = coerceText(value.id, MAX_ID_LENGTH);
   const topic = coerceText(value.topic, 60);
   const title = coerceText(value.title, 200);
-  const insight = coerceText(value.insight, 400);
-  const deeper = coerceText(value.deeper, 4000);
+  // An excerpt (the publisher's own words, made without AI) has no insight or deeper explanation.
+  const excerpt = value.kind === "excerpt";
+  const insight = excerpt ? "" : coerceText(value.insight, 400);
+  const deeper = excerpt ? "" : coerceText(value.deeper, 4000);
   const publishedAt = coerceText(value.publishedAt, 40);
-  if (!id || !topic || !title || !insight || !deeper || !publishedAt) return null;
+  if (!id || !topic || !title || insight === null || deeper === null || !publishedAt) return null;
   if (!Array.isArray(value.explanation)) return null;
   const explanation = value.explanation
     .map((paragraph) => coerceText(paragraph, 4000))
@@ -151,7 +153,9 @@ export function coercePost(value: unknown): Post | null {
     const articleDate = entry.articleDate === null ? null : coerceText(entry.articleDate,40);
     if (!citation || !publisher || !accessedAt || !Number.isFinite(Date.parse(accessedAt))
       || (entry.articleDate !== null && (!articleDate || !Number.isFinite(Date.parse(articleDate))))) return null;
-    sources.push({url:citation.url,title:citation.label,publisher,accessedAt,articleDate});
+    const author = coerceText(entry.author, 120);
+    const licence = coerceText(entry.licence, 80);
+    sources.push({url:citation.url,title:citation.label,publisher,accessedAt,articleDate,...(author ? { author } : {}),...(licence ? { licence } : {})});
   }
   const status = value.status === "published" ? "published" : "sample";
   const contentType = value.contentType === "news" ? "news" : "evergreen";
@@ -166,7 +170,33 @@ export function coercePost(value: unknown): Post | null {
   const queuedAt = queued && Number.isFinite(Date.parse(queued)) ? queued : undefined;
   return { id, topic, title, explanation, insight, deeper, publishedAt, status, contentType, sources,
     ...(umbrella ? { umbrella } : {}), ...(field ? { field } : {}), ...(subtopic ? { subtopic } : {}), ...(queuedAt ? { queuedAt } : {}),
-    ...(eventDate ? {eventDate} : {}), ...(source ? { source } : {}) };
+    ...(eventDate ? {eventDate} : {}), ...(source ? { source } : {}),
+    ...(excerpt ? { kind: "excerpt" as const } : {}), ...(value.hasBody === true ? { hasBody: true } : {}) };
+}
+
+/**
+ * Validate a saved article from `post_body`: plain text blocks only, never markup. Anything malformed is
+ * dropped block by block; null when nothing readable is left.
+ */
+export function coerceBlocks(value: unknown): BodyBlock[] | null {
+  if (!Array.isArray(value)) return null;
+  const strings = (list: unknown, count: number, max: number) =>
+    Array.isArray(list) ? list.slice(0, count).map((item) => coerceText(item, max)).filter((item): item is string => item !== null) : [];
+  const blocks: BodyBlock[] = [];
+  for (const block of value.slice(0, 300)) {
+    if (!isObject(block)) continue;
+    if (block.t === "h" || block.t === "p" || block.t === "q") {
+      const text = coerceText(block.text, 4000);
+      if (text) blocks.push({ t: block.t, text });
+    } else if (block.t === "ul" || block.t === "ol") {
+      const items = strings(block.items, 50, 4000);
+      if (items.length) blocks.push({ t: block.t, items });
+    } else if (block.t === "table" && Array.isArray(block.rows)) {
+      const rows = block.rows.slice(0, 40).map((row) => strings(row, 12, 300)).filter((row) => row.length);
+      if (rows.length) blocks.push({ t: "table", rows });
+    }
+  }
+  return blocks.length ? blocks : null;
 }
 
 export function coercePosts(value: unknown): Post[] {

@@ -1,15 +1,16 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowDown, Bookmark, CheckCheck, Layers2, LockKeyhole, Map as MapIcon, RotateCw, Sparkles, Sprout } from "lucide-react";
 import { emptyPost, type PostPatch } from "@/lib/storage";
-import type { ReadingPosition } from "@/types/post";
+import type { Post, ReadingPosition } from "@/types/post";
 import { useReading } from "@/hooks/useReading";
 import { useList } from "@/hooks/useList";
 import { PostCard } from "./PostCard";
 import { KnowledgeMap } from "./KnowledgeMap";
+import { ArticleReader } from "./ArticleReader";
 import { ratingLabels } from "./FeedbackBar";
 
 type View = "feed" | "library" | "read" | "map";
@@ -32,6 +33,19 @@ export function Feed({
     .sort((a, b) => Date.parse(state.posts[b.id]?.readAt ?? "") - Date.parse(state.posts[a.id]?.readAt ?? ""));
   const readList = useList(client, "read", view === "read", readHere);
   const [announcement, setAnnouncement] = useState("");
+  // The saved article open over the feed, if any. It sits on the history stack, so the phone's back gesture
+  // closes it rather than leaving the app.
+  const [reading, setReading] = useState<Post | null>(null);
+  const closeReader = useCallback(() => {
+    if (history.state?.reader) history.back();
+    else setReading(null);
+  }, []);
+  useEffect(() => {
+    if (!reading) return;
+    const pop = () => setReading(null);
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, [reading]);
   const current = useRef({ state, saveProgress, savePost, loadMore });
   useEffect(() => {
     current.current = { state, saveProgress, savePost, loadMore };
@@ -113,7 +127,8 @@ export function Feed({
       },
       { threshold: 0.5 },
     );
-    document.querySelectorAll(".insight").forEach((element) => observer.observe(element));
+    // A post's key insight, or an excerpt's text, seen for five seconds counts as read.
+    document.querySelectorAll(".insight, .excerpt").forEach((element) => observer.observe(element));
     return () => {
       observer.disconnect();
       timers.forEach(clearTimeout);
@@ -148,6 +163,12 @@ export function Feed({
       setAnnouncement(patch.rating ? `${ratingLabels[patch.rating]} recorded.` : "Rating cleared.");
     else if (patch.bookmarked !== undefined)
       setAnnouncement(patch.bookmarked ? "Saved to your Library." : "Removed from your Library.");
+  }
+  /** Open the article saved from the feed. Reading it counts like opening the original. */
+  function openReader(post: Post) {
+    updatePost(post.id, { opened: true });
+    history.pushState({ ...history.state, reader: post.id }, "");
+    setReading(post);
   }
   /** New posts sit at the end of the feed: load down to the first of them, then scroll to it. */
   async function showFresh(postId: string) {
@@ -291,6 +312,7 @@ export function Feed({
               state={state.posts[post.id] ?? emptyPost}
               disabled={!ready}
               onChange={(patch) => updatePost(post.id, patch)}
+              onRead={() => openReader(post)}
             />
           ))}
         </div>
@@ -349,6 +371,7 @@ export function Feed({
           </>
         )}
         </>}
+        {reading && <ArticleReader client={client} post={reading} onClose={closeReader} />}
         <footer>
           Your reading, kept together.
           <br />

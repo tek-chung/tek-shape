@@ -53,8 +53,9 @@
   },
   {
     "publisher": "MIT Sloan Management Review",
-    "hosts": ["sloanreview.mit.edu"],
-    "feeds": ["https://sloanreview.mit.edu/feed/"],
+    "hosts": ["sloanreview.mit.edu", "feeds.feedburner.com"],
+    "feeds": ["https://feeds.feedburner.com/mitsmr"],
+    "keepBody": true,
     "pages": ["https://sloanreview.mit.edu/", "https://sloanreview.mit.edu/topic/leadership/", "https://sloanreview.mit.edu/topic/strategy/", "https://sloanreview.mit.edu/topic/ai-machine-learning/"],
     "match": "^https://sloanreview\\.mit\\.edu/article/[a-z0-9-]+/?$"
   },
@@ -66,5 +67,76 @@
     "match": "^https://theconversation\\.com/[a-z0-9-]+-\\d{5,}$"
   },
   { "publisher": "Knowledge at Wharton", "hosts": ["knowledge.wharton.upenn.edu"], "feeds": ["https://knowledge.wharton.upenn.edu/feed/"], "match": "/article/|/podcast/" },
+  {
+    "publisher": "MIT Technology Review",
+    "hosts": ["www.technologyreview.com"],
+    "feeds": ["https://www.technologyreview.com/feed/"],
+    "match": "^https://www\\.technologyreview\\.com/\\d{4}/\\d{2}/\\d{2}/\\d+/[a-z0-9-]+/?$",
+    "skip": "/the-download-|/roundtables-|ai-hype-index",
+    "mode": "excerpt",
+    "keepBody": true,
+    "field": "tech-industry",
+    "fieldRules": [
+      { "category": "Artificial intelligence", "field": "artificial-intelligence" },
+      { "category": "AI", "field": "artificial-intelligence" },
+      { "category": "Computing", "field": "computing-software" },
+      { "category": "Biotechnology and health", "field": "medicine-health" },
+      { "category": "Climate change and energy", "field": "energy-transport" },
+      { "category": "Space", "field": "astronomy-cosmology" },
+      { "category": "Policy", "field": "public-policy" },
+      { "category": "Security", "field": "internet-security" },
+      { "category": "Culture", "field": "ideas-culture" },
+      { "category": "Humans and technology", "field": "ideas-culture" }
+    ]
+  },
+  {
+    "publisher": "CFO Secrets",
+    "hosts": ["www.cfosecrets.io"],
+    "feeds": ["https://www.cfosecrets.io/sitemap.xml"],
+    "match": "^https://www\\.cfosecrets\\.io/p/[a-z0-9-]+$",
+    "mode": "excerpt",
+    "excerptFrom": "description",
+    "contentType": "evergreen",
+    "perRun": 1,
+    "field": "corporate-finance",
+    "subtopic": "CFO playbooks",
+    "fieldRules": [
+      { "url": "/p/[a-z0-9-]*(career|path-to-cfo|becoming-cfo|first-cfo|intern|big-four|jump|hired|leap|semiretirement|burnout|imposter|non-traditional)", "field": "work-careers", "subtopic": "CFO careers" },
+      { "url": "/p/[a-z0-9-]*(board|politic|ceo|leadership|influenc|hiring|talent|team|mindset|traits|behave|ethic|stress|pressure)", "field": "management-leadership", "subtopic": "Leading as CFO" }
+    ]
+  },
+  {
+    "publisher": "OpenStax Biology 2e",
+    "hosts": ["openstax.org"],
+    "feeds": ["https://openstax.org/rex/sitemaps/biology-2e.xml"],
+    "match": "^https://openstax\\.org/books/biology-2e/pages/\\d+-\\d+-[a-z0-9-]+$",
+    "mode": "excerpt",
+    "contentType": "evergreen",
+    "perRun": 1,
+    "licence": "CC BY-NC-SA 4.0",
+    "field": "genetics-molecular-biology",
+    "fieldRules": [
+      { "url": "/pages/(18|19|20)-\\d", "field": "evolution-palaeontology" },
+      { "url": "/pages/4[4-7]-\\d", "field": "ecology-conservation" },
+      { "url": "/pages/3[56]-\\d", "field": "neuroscience" },
+      { "url": "/pages/42-\\d", "field": "medicine-health" },
+      { "url": "/pages/(2[3-9]|3[0-4]|3[7-9]|4[013])-\\d", "field": "animals-plants" }
+    ]
+  },
+  {
+    "publisher": "OpenStax Principles of Economics 3e",
+    "hosts": ["openstax.org"],
+    "feeds": ["https://openstax.org/rex/sitemaps/principles-economics-3e.xml"],
+    "match": "^https://openstax\\.org/books/principles-economics-3e/pages/\\d+-\\d+-[a-z0-9-]+$",
+    "mode": "excerpt",
+    "contentType": "evergreen",
+    "perRun": 1,
+    "licence": "CC BY-NC-SA 4.0",
+    "field": "markets-investing",
+    "fieldRules": [
+      { "url": "/pages/(19|2\\d|3[0-4])-\\d", "field": "macroeconomics" },
+      { "url": "/pages/(12|13|15|18)-\\d", "field": "public-policy" }
+    ]
+  },
   { "publisher": "Hacker News", "hosts": ["news.ycombinator.com"], "feeds": ["https://news.ycombinator.com/rss"], "openHosts": true }
 ]

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyOutbox, applyPatch, emptyPost, initialState, marksRead, readBefore } from "../../src/lib/storage.ts";
+import { applyOutbox, applyPatch, coerceBlocks, coercePost, emptyPost, initialState, marksRead, readBefore } from "../../src/lib/storage.ts";
 
 const at = (time) => `2026-09-24T${time}:00.000Z`;
 const stateWith = (posts) => ({ ...initialState, posts });
@@ -49,4 +49,31 @@ test("a post rated, saved or opened on an older app, with no read time, counts a
   });
   for (const id of ["rated", "saved", "deeper", "opened"]) assert.equal(readBefore(state, id, at("12:00")), true, id);
   assert.equal(readBefore(state, "untouched", at("12:00")), false);
+});
+
+const published = { id: "idea-1", topic: "Technology", title: "Towers", explanation: ["The opening paragraph."], publishedAt: "2026-09-24T10:00:00Z",
+  status: "published", contentType: "news",
+  sources: [{ url: "https://www.technologyreview.com/a", title: "Towers", publisher: "MIT Technology Review", accessedAt: "2026-09-24T10:00:00Z", articleDate: null, author: "Ada Writer", licence: "CC BY-NC-SA 4.0" }] };
+
+test("an excerpt needs no insight or deeper explanation; an ordinary post still does", () => {
+  const excerpt = coercePost({ ...published, kind: "excerpt", insight: null, deeper: null, hasBody: true });
+  assert.equal(excerpt.kind, "excerpt");
+  assert.equal(excerpt.insight, "");
+  assert.equal(excerpt.hasBody, true);
+  assert.equal(excerpt.sources[0].author, "Ada Writer");
+  assert.equal(excerpt.sources[0].licence, "CC BY-NC-SA 4.0");
+  assert.equal(coercePost({ ...published, insight: null, deeper: null }), null);
+  const post = coercePost({ ...published, insight: "I", deeper: "D" });
+  assert.equal(post.kind, undefined);
+  assert.equal(post.hasBody, undefined);
+});
+
+test("a saved article is plain text blocks; anything else is dropped", () => {
+  const blocks = coerceBlocks([
+    { t: "p", text: "A paragraph." }, { t: "h", text: "A heading" }, { t: "ul", items: ["One", 2, "Two"] },
+    { t: "table", rows: [["A", "B"], []] }, { t: "script", text: "alert(1)" }, { t: "p", html: "<b>bold</b>" }, "text", null,
+  ]);
+  assert.deepEqual(blocks, [{ t: "p", text: "A paragraph." }, { t: "h", text: "A heading" }, { t: "ul", items: ["One", "Two"] }, { t: "table", rows: [["A", "B"]] }]);
+  assert.equal(coerceBlocks([]), null);
+  assert.equal(coerceBlocks({ t: "p", text: "x" }), null);
 });

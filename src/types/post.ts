@@ -25,8 +25,20 @@ export interface Post extends SeedPost {
   queuedAt?: string;
   contentType?: "news" | "evergreen";
   eventDate?: string;
-  sources?: { url: string; publisher: string; title: string; articleDate: string | null; accessedAt: string }[];
+  sources?: { url: string; publisher: string; title: string; articleDate: string | null; accessedAt: string; author?: string; licence?: string }[];
+  /**
+   * "excerpt": the publisher's own words and a link, made without AI, for sources whose terms rule AI out.
+   * An excerpt has no insight or deeper explanation (both are then empty strings).
+   */
+  kind?: "excerpt";
+  /** The feed carried the whole article and it was saved for reading here; fetched with `post_body`. */
+  hasBody?: boolean;
 }
+/** One block of a saved article: plain text only, so nothing from a feed can run or style anything. */
+export type BodyBlock =
+  | { t: "h" | "p" | "q"; text: string }
+  | { t: "ul" | "ol"; items: string[] }
+  | { t: "table"; rows: string[][] };
 export interface PostState {
   rating: Rating | null;
   bookmarked: boolean;

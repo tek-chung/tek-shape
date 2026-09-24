@@ -2,11 +2,11 @@ import { readFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
 import nextEnv from "@next/env";
 import { CLASSIFY_RULES, DRAFT_INSTRUCTION, discover, draftCandidates, modelSource, publisherOf, settleDraft, validateSources } from "./engine.mjs";
-import { extractArticle, fetchSource } from "./sources.mjs";
+import { extractArticle, fetchSource, pageExcerpt } from "./sources.mjs";
 import { ModelChainError, classifySchema, draftSchema, generateJSON, liveModels, modelConfig, triageSchema } from "./model.mjs";
 import { buildTaste, judgeTopic, planSources, promptSummary, rankQueue, snapshotOf, sourceOf } from "./taste.mjs";
 import { cleanSubtopic, placeOf } from "./taxonomy.mjs";
-import { checkDraft, checkReview, excerptFound, recentConcepts } from "./editorial.mjs";
+import { checkDraft, checkExcerpt, checkReview, excerptFound, recentConcepts } from "./editorial.mjs";
 
 nextEnv.loadEnvConfig(process.cwd());
 const COMMANDS = ["check", "probe", "draft", "review", "publish", "publish-checked", "prepare", "cycle", "classify", "status", "providers", "models"];
@@ -43,6 +43,8 @@ async function result(query) {
   return data;
 }
 let db;
+// Everything the engine reads about a post, and not the saved article bodies, which can be tens of kilobytes each.
+const POST_COLUMNS = "id,topic,title,explanation,insight,deeper,status,published_at,content_type,subtopic,difficulty,concept_ids,event_date,article_date,verification_status,sources,reviewed_at,umbrella,field";
 async function all(table, columns = "*") {
   const rows = [];
   for (let from = 0; ; from += 500) {
@@ -81,7 +83,7 @@ const TRIAGE_INSTRUCTION = `File each headline in the fixed subject map before a
 
 async function draft(config) {
   const [groups, posts, states, drafted] = await Promise.all([
-    loadSources(), all("post"), all("user_post_state"),
+    loadSources(), all("post", POST_COLUMNS), all("user_post_state"),
     // Only the source URL and publisher, not the stored evidence text, which can run to tens of kilobytes each.
     all("content_candidate", "id,status,created_at,url:evidence->0->>url,publisher:evidence->0->>publisher"),
   ]);
@@ -178,6 +180,8 @@ async function classify(config) {
 
 /** Re-run every check before publishing, so nothing is published on a stale verdict. */
 function passesChecks(candidate) {
+  // An excerpt is the publisher's own words, made without AI: format and source only.
+  if (candidate.checks?.mode === "excerpt") return !checkExcerpt(candidate.payload).length;
   // A draft made with checks off is judged by the same rule it was made under: format only, no review.
   if (candidate.checks?.mode === "off") return !checkDraft(candidate.payload, candidate.evidence, Date.now(), { evidence: false }).length;
   return !checkDraft(candidate.payload, candidate.evidence).length && checkReview(candidate.checks?.review, candidate.payload);
@@ -194,7 +198,9 @@ async function publishChecked() {
     try {
       await result(db.rpc("publish_candidate", {
         p_id: candidate.id,
-        p_note: candidate.checks?.mode === "off"
+        p_note: candidate.checks?.mode === "excerpt"
+          ? "Auto-published excerpt: the publisher's own words and link, made without AI."
+          : candidate.checks?.mode === "off"
           ? `Auto-published with checks off: claims not verified against the source (${models.join(", ") || "model unrecorded"}).`
           : `Auto-published: passed source-excerpt checks and model review (${models.join(", ") || "model unrecorded"}).`,
       }));
@@ -213,7 +219,7 @@ async function publishChecked() {
  */
 async function prepare() {
   const [posts, states, reader] = await Promise.all([
-    all("post"), all("user_post_state"), result(db.from("allowed_reader").select("user_id").single()),
+    all("post", POST_COLUMNS), all("user_post_state"), result(db.from("allowed_reader").select("user_id").single()),
   ]);
   const { model, queue } = await loadTaste(posts, states);
   const byId = new Map(posts.map((p) => [p.id, p]));
@@ -272,6 +278,9 @@ async function check() {
     await attempt("Migration 202609270001 (taste)",
       async () => { await result(db.from("taste_snapshot").select("user_id").limit(1)); await result(db.from("topic_preference").select("key").limit(1)); await result(db.from("feed_queue").select("slot").limit(1)); },
       "apply supabase/migrations/202609250001, 202609260001 and 202609270001 in order");
+    await attempt("Migration 202609300001 (excerpts and saved articles)",
+      async () => { await result(db.from("post").select("kind,body").limit(1)); },
+      "apply supabase/migrations/202609300001_excerpts.sql (after 202609290001) before excerpts can be published");
     await attempt("Enrolled reader", async () => {
       const rows = await result(db.from("allowed_reader").select("user_id"));
       if (rows.length !== 1) throw new Error(`${rows.length} enrolled`);
@@ -304,15 +313,28 @@ async function check() {
     // Discovery, then one real article: a feed can list plenty yet every page be paywalled or blocked.
     await attempt(`Source: ${group.publisher}`, async () => {
       const feedReasons = [];
-      const { urls, linkHosts } = await discover(group, fetchSource, (why) => { feedReasons.push(why); });
+      const { urls, linkHosts, titles } = await discover(group, fetchSource, (why) => { feedReasons.push(why); });
       if (!urls.length) throw new Error(feedReasons.length ? `feed or page unreachable (${[...new Set(feedReasons)].join("; ")})` : "reachable, but listed no articles on the allowed hosts");
+      const sample = urls.slice(0, 5).map((url) => titles.get(url) ?? {});
+      const bodies = sample.filter((item) => item.body).length;
+      const fullText = group.keepBody ? `; full text in the feed for ${bodies} of ${sample.length}` : "";
+      if (group.mode === "excerpt") {
+        // Excerpts come from the feed when it has words to show; otherwise from each page's first paragraph.
+        const worded = sample.filter((item) => item.body || (item.description ?? "").length >= 80).length;
+        if (worded) return `${urls.length} items; excerpts from the feed (${worded} of ${sample.length})${fullText}; no AI`;
+        const page = pageExcerpt(await fetchSource(urls[0], linkHosts));
+        const words = group.excerptFrom === "description" ? page.description : page.paragraph;
+        if (!words) throw new Error(`the first page has no ${group.excerptFrom === "description" ? "description" : "opening paragraph"} to show`);
+        return `${urls.length} pages; excerpt readable (${words.length} characters); no AI`;
+      }
       const reasons = [];
       for (const url of urls.slice(0, 3)) {
         try {
           const article = extractArticle(await fetchSource(url, linkHosts), publisherOf(group, url));
-          return `${urls.length} articles; sample readable (${article.text.length.toLocaleString()} characters)`;
+          return `${urls.length} articles; sample readable (${article.text.length.toLocaleString()} characters)${fullText}`;
         } catch (error) { reasons.push(error.message); }
       }
+      if (bodies) return `${urls.length} articles; pages gated (${[...new Set(reasons)].join("; ")}), so posts are drafted from the feed's full text${fullText}`;
       throw new Error(`${urls.length} articles listed, but none of the first ${Math.min(3, urls.length)} could be read: ${[...new Set(reasons)].join("; ")}`);
     }, "posts from this source will be skipped; remove it or adjust its match/skip patterns");
   }

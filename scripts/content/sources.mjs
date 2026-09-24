@@ -140,32 +140,120 @@ export async function fetchSource(input, hosts, redirects = 0) {
   return { url: url.href, text: response.text, accessedAt: new Date().toISOString() };
 }
 
-/** Feed items with their headline and summary, which the triage call reads before anything is drafted. */
-export function discoverXMLItems(xml, hosts, limit = 10) {
+/**
+ * Feed items with their headline and summary, which the triage call reads before anything is drafted, and
+ * what an excerpt needs: the publisher's own description, categories, date and author. With `bodies`, also
+ * the article body the feed carries (raw HTML; see feedBlocks). A sitemap (OpenStax lists each book's
+ * sections in one) gives locations only, and far more of them than a feed.
+ */
+export function discoverXMLItems(xml, hosts, limit = 10, { bodies = false } = {}) {
   const parsed = new XMLParser({ ignoreAttributes: false, processEntities: false }).parse(xml);
   // RSS 2.0, Atom, and RSS 1.0 (RDF, used by Nature), where items sit beside the channel, not inside it.
   const rdf = parsed["rdf:RDF"];
-  const raw = parsed.rss?.channel?.item ?? parsed.feed?.entry ?? rdf?.item ?? rdf?.channel?.item ?? [];
+  const sitemap = parsed.urlset ? (parsed.urlset.url ?? []) : null;
+  const raw = sitemap ?? parsed.rss?.channel?.item ?? parsed.feed?.entry ?? rdf?.item ?? rdf?.channel?.item ?? [];
   const items = Array.isArray(raw) ? raw : [raw];
   const seen = new Set();
   const found = [];
   for (const item of items) {
-    const links = Array.isArray(item?.link) ? item.link : [item?.link];
+    const links = sitemap ? [textOf(item?.loc)] : Array.isArray(item?.link) ? item.link : [item?.link];
     const link = links.find((value) => typeof value === "string" || !value?.["@_rel"] || value["@_rel"] === "alternate");
     let url;
-    try { url = safeURL(typeof link === "string" ? link : link?.["@_href"], hosts).href; } catch { continue; /* Off-site or malformed. */ }
+    try { url = safeURL(typeof link === "string" ? link.trim() : link?.["@_href"], hosts).href; } catch { continue; /* Off-site or malformed. */ }
     if (seen.has(url)) continue;
     seen.add(url);
-    found.push({ url, title: plain(item.title), summary: plain(item.description ?? item.summary ?? item["content:encoded"]).slice(0, 300) });
+    if (sitemap) { found.push({ url, title: "", summary: "", description: "", categories: [], published: null, author: "" }); continue; }
+    const body = textOf(item["content:encoded"] ?? item.content);
+    const date = textOf(item.pubDate ?? item.published ?? item["dc:date"] ?? item.updated);
+    const categories = (Array.isArray(item.category) ? item.category : item.category ? [item.category] : [])
+      .map((c) => normalise(decodeEntities(typeof c === "string" ? c : textOf(c) || c?.["@_term"] || ""))).filter((c) => c && c.length <= 60).slice(0, 12);
+    found.push({
+      url, title: plain(item.title), summary: plain(item.description ?? item.summary ?? body).slice(0, 300),
+      description: plain(item.description ?? item.summary, 1200), categories,
+      published: Number.isFinite(Date.parse(date)) ? new Date(date).toISOString() : null,
+      author: plain(item["dc:creator"] ?? item.author?.name ?? item.author, 120),
+      ...(bodies && body ? { body } : {}),
+    });
   }
-  return found.slice(0, limit);
+  return found.slice(0, sitemap ? 2000 : limit);
 }
 export function discoverXML(xml, hosts, limit = 10) { return discoverXMLItems(xml, hosts, limit).map((item) => item.url); }
 
+/** The text of a parsed XML value: a string, or the text of a CDATA or attributed element. */
+const textOf = (value) => (typeof value === "string" ? value : typeof value?.["#text"] === "string" ? value["#text"] : "");
+const decodeEntities = (value) => load(`<div>${value}</div>`)("div").text();
 /** Text from a feed field that may be a string, CDATA object or HTML. */
-function plain(value) {
-  const text = typeof value === "string" ? value : typeof value?.["#text"] === "string" ? value["#text"] : "";
-  return normalise(load(`<div>${text}</div>`)("div").text()).slice(0, 300);
+function plain(value, max = 300) {
+  return normalise(decodeEntities(textOf(value))).slice(0, max);
+}
+
+// WordPress appends "The post … appeared first on …" to every item in a full-content feed.
+const FEED_FOOTER = /^the post .{1,300} appeared first on .{1,200}$/i;
+const MAX_BLOCK_CHARS = 4000;
+
+/**
+ * A feed's article body as plain blocks for reading in the app: headings, paragraphs, lists, quotes and
+ * simple tables, text only. No markup survives, so nothing from a feed can run or style anything in the
+ * app, and images and embeds are dropped. Returns [] when there is nothing worth keeping.
+ */
+export function feedBlocks(html, { maxBlocks = 300, maxChars = 60_000 } = {}) {
+  const $ = load(`<div id="feed-body">${html}</div>`);
+  $("script,style,noscript,iframe,object,embed,form,button,svg,img,picture,video,audio,figure,figcaption").remove();
+  const blocks = [];
+  let total = 0;
+  const push = (block, size) => {
+    if (blocks.length >= maxBlocks || total + size > maxChars) return;
+    blocks.push(block);
+    total += size;
+  };
+  const clean = (element) => normalise($(element).text()).slice(0, MAX_BLOCK_CHARS);
+  $("#feed-body").find("h1,h2,h3,h4,h5,h6,p,ul,ol,blockquote,table").each((_, element) => {
+    // Each block once: a paragraph inside a quote, list or table belongs to that block.
+    if ($(element).parents("blockquote,ul,ol,table").length) return;
+    const tag = element.name;
+    if (tag === "ul" || tag === "ol") {
+      const items = $(element).children("li").map((_, li) => clean(li)).get().filter(Boolean).slice(0, 50);
+      if (items.length) push({ t: tag, items }, items.join("").length);
+    } else if (tag === "table") {
+      const rows = $(element).find("tr").map((_, tr) => [$(tr).children("th,td").map((_, cell) => clean(cell).slice(0, 300)).get().slice(0, 12)]).get()
+        .filter((row) => row.some(Boolean)).slice(0, 40);
+      if (rows.length) push({ t: "table", rows }, rows.flat().join("").length);
+    } else {
+      const text = clean(element);
+      if (!text || (tag === "p" && FEED_FOOTER.test(text))) return;
+      push({ t: tag === "p" ? "p" : tag === "blockquote" ? "q" : "h", text }, text.length);
+    }
+  });
+  return blocks;
+}
+
+/** The readable text of blocks, for drafting from a feed's copy and for size checks. */
+export const blocksText = (blocks) => blocks.map((b) => b.text ?? (b.items ?? b.rows?.flat() ?? []).join(" ")).filter(Boolean).join("\n\n");
+
+/** Newsletters decorate headlines with emoji ("📬 The 3am cash flow stare"); a card reads better without. */
+export const plainTitle = (value) => normalise(String(value ?? "").replace(/^[\p{Extended_Pictographic}\p{Emoji_Modifier}️‍\s]+/u, ""));
+
+/**
+ * For an excerpt source without a feed summary (a textbook section, a newsletter issue): the page's heading,
+ * its first substantial paragraph (skipping "By the end of this section…" learning objectives and list
+ * lead-ins), the publisher's own one-line description, and its publication date.
+ */
+export function pageExcerpt(response) {
+  const $ = load(response.text);
+  const heading = plainTitle($("h1").first().text() || $("meta[property='og:title']").attr("content") || $("title").text());
+  const description = normalise($("meta[property='og:description']").attr("content") || $("meta[name='description']").attr("content") || "");
+  const rawDate = $("meta[property='article:published_time']").attr("content");
+  $("script,style,nav,footer,header,noscript,form,aside,figure,figcaption,button,svg,[aria-hidden='true']").remove();
+  const main = $("main").first().length ? $("main").first() : $("article").first().length ? $("article").first() : $("body");
+  const paragraph = main.find("p").map((_, p) => normalise($(p).text())).get()
+    .find((p) => p.length >= 120 && !/:$/.test(p) && !/^by the end of this (section|chapter|module)/i.test(p));
+  return {
+    // "6.3 The Laws of Thermodynamics" reads better without its section number.
+    title: heading.replace(/^\d+(\.\d+)*\s+/, "").slice(0, 200),
+    paragraph: paragraph ? paragraph.slice(0, 1200) : null,
+    description: description.slice(0, 600),
+    articleDate: rawDate && Number.isFinite(Date.parse(rawDate)) ? new Date(rawDate).toISOString() : null,
+  };
 }
 
 /**

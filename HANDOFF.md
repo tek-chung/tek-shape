@@ -354,6 +354,37 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
   Triage and classify keep their enums. Test guards against a long enum returning to the draft schema.
 - Confirm with `npm run content -- probe` (real draft schema; prints Gemini's own error text if any).
 
+## 5o. Excerpt sources and saved articles (24 Sep 2026)
+
+- Owner asked for MIT Technology Review, OpenStax and CFO Secrets without AI: "first paragraph / summary
+  and the link". MIT TR's terms bar AI use (incl. classification) but allow keeping content for your own
+  non-commercial use; OpenStax (CC BY-NC-SA 4.0) bars only LLM use; CFO Secrets forbids use, reproduction
+  or scraping without permission and has no feed, so it stays out.
+- Owner also asked: where a site is gated but its feed carries the article, save the body and make it
+  readable in the app under the source link.
+- Engine: group `mode: "excerpt"` (never triaged, never sent to a model; `field`, `fieldRules` by feed
+  category or URL, `perRun`, `contentType`, `licence`), `keepBody` for any group. `sources.mjs`:
+  `discoverXMLItems` returns description/categories/published/author (+ `body` on request) and reads
+  sitemaps; `feedBlocks` turns feed HTML into text-only blocks (p/h/q/ul/ol/table); `pageExcerpt` takes a
+  page's first real paragraph (skips learning objectives). Gated page + feed body → drafted from the feed's
+  copy; the reviewer never sees the body. `checkExcerpt`/`validBlocks` in `editorial.mjs`.
+  `run.mjs` reads posts without bodies (`POST_COLUMNS`) and `check` reports feed summaries/full text.
+- Migration `202609300001_excerpts.sql`: `post.kind` ('post'|'excerpt'), `post.body` jsonb (≤300 blocks,
+  ≤150 KB); insight/deeper nullable only for excerpts (checks renamed in place); `publish_candidate`
+  carries kind/body; `post_json` adds `kind`, `hasBody` (never the body); `post_body(id)` RPC.
+- App: excerpt card (EXCERPT label, "in their words" note, no insight/deeper/Book control), "Read the full
+  article here" → `ArticleReader` overlay (fetches `post_body`, text-only rendering, history entry so Back
+  closes it, counts as opened). Auto-read observes `.insight, .excerpt`.
+- Sources: MIT Technology Review (excerpt + keepBody; skips The Download, Roundtables, AI Hype Index),
+  OpenStax Biology 2e and Principles of Economics 3e (excerpt via sitemaps, one per run, URL rules by
+  chapter), MIT SMR `keepBody`. 28 groups. Tests: content 107, SQL 57, client 6.
+- Then CFO Secrets, on the owner's statement that they have the publisher's express permission (the site's
+  notice requires it). Excerpt mode via its sitemap (`/p/` posts, newest first, one per run) with
+  `excerptFrom: "description"`: issues open with sponsor copy, so the card shows the publisher's own
+  subtitle. URL keyword rules file careers and leadership issues; `plainTitle` strips emoji from
+  headlines. If the permission covers AI summaries too, drop `mode`/`excerptFrom` to draft it normally.
+  29 groups; content tests 108.
+
 ## 6. Next steps
 
 1. **User:** `npm run lint` and `npm run build`.

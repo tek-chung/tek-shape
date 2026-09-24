@@ -15,9 +15,11 @@ interface Props {
   state: PostState;
   disabled: boolean;
   onChange: (patch: PostPatch) => void;
+  /** False for an excerpt, which has no deeper explanation to open. */
+  canExpand?: boolean;
 }
 
-export function FeedbackBar({ postId, state, disabled, onChange }: Props) {
+export function FeedbackBar({ postId, state, disabled, onChange, canExpand = true }: Props) {
   const ratings = [
     { value: "more" as const, Icon: ThumbsUp },
     { value: "uninteresting" as const, Icon: ThumbsDown },
@@ -37,12 +39,12 @@ export function FeedbackBar({ postId, state, disabled, onChange }: Props) {
       onClick={() => onChange({ bookmarked: !state.bookmarked })}>
       <Bookmark size={19} fill={state.bookmarked ? "currentColor" : "none"} aria-hidden="true" />
     </button>
-    <button type="button" className="icon-button" disabled={disabled}
+    {canExpand && <button type="button" className="icon-button" disabled={disabled}
       aria-label={state.expanded ? "Collapse deeper explanation" : "Expand deeper explanation"}
       title={state.expanded ? "Collapse deeper explanation" : "Expand deeper explanation"}
       aria-expanded={state.expanded} aria-controls={`deeper-${postId}`}
       onClick={() => onChange({ expanded: !state.expanded })}>
       <BookOpen size={19} aria-hidden="true" />
-    </button>
+    </button>}
   </div>;
 }
