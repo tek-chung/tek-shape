@@ -147,6 +147,19 @@ test("a gated page whose feed carries the article is drafted from the feed's cop
   assert.equal(saved[0].status, "checked", JSON.stringify(saved[0].checks.errors));
 });
 
+test("posts drafted before a source kept bodies get the article while the feed still carries it", async () => {
+  const group = { publisher: "MIT Sloan Management Review", hosts: ["sloanreview.mit.edu"], feeds: ["https://sloanreview.mit.edu/feed/"], keepBody: true };
+  const body = `<p>${"Generative AI tools can produce polished outputs that mask declining skills. ".repeat(20)}</p>`;
+  const xml = rss([`<item><title>Capability mirage</title><link>https://sloanreview.mit.edu/article/mirage/</link><content:encoded><![CDATA[${body}]]></content:encoded></item>`]);
+  const offered = []; const events = [];
+  await draftCandidates({ groups: [group], known: new Set(["https://sloanreview.mit.edu/article/mirage/"]), save: async () => {},
+    retrieve: async (url) => ({ url, text: xml }), generate: async () => { throw new Error("nothing new to draft"); },
+    attachBodies: async (items) => { offered.push(...items); return items.length; }, onProgress: (e) => events.push(e) });
+  assert.deepEqual(offered.map((o) => o.url), ["https://sloanreview.mit.edu/article/mirage/"], "an already-drafted article is offered for its post");
+  assert.ok(validBlocks(offered[0].body));
+  assert.deepEqual(events.map((e) => [e.stage, e.outcome]), [["feed", "saved the full text for 1 earlier post"]]);
+});
+
 test("the reviewer sees the post without the saved article riding along", async () => {
   const group = { publisher: "MIT Sloan Management Review", hosts: ["sloanreview.mit.edu"], feeds: ["https://sloanreview.mit.edu/feed/"], keepBody: true };
   const text = "Energy is neither created nor destroyed in a closed system. ".repeat(20);

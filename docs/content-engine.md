@@ -189,5 +189,6 @@ Actions tab.
 | `review <id>` | print one candidate |
 | `prepare` | append published posts to your queue |
 | `status` | candidate counts, queue depth, today's usage per provider |
+| `bodies` | save the full article onto earlier posts from `keepBody` sources, while their feeds still carry it (no AI; every `cycle` does this too) |
 | `providers` | show the configured chain (never prints keys) |
 | `models` | ask each provider which models it serves now; flags retired ones |

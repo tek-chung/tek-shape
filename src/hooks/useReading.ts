@@ -46,6 +46,8 @@ const COLD_NOTICE = "Your private feed could not be loaded. Check your connectio
 // hold up a refresh.
 const FLUSH_WAIT_MS = 4_000;
 const PAGE_WAIT_MS = 5_000;
+// Posts drawn from the engine's reserve when the feed runs low.
+const TOP_UP = 10;
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** Posts that joined the feed after the previous sitting began. */
@@ -194,6 +196,21 @@ export function useReading(client: SupabaseClient, userId: string) {
     flushLater.current = flush;
   }, [flush]);
 
+  /**
+   * At the end of the feed with fewer than a page of unread posts left: move the next posts the engine ranked
+   * (its reserve) into the feed, so a long read never waits for the next run. Only when unread posts run low,
+   * so an idle feed never keeps growing. Returns how many moved; 0 offline or before the migration.
+   */
+  const drawReserve = useCallback(async (list: Post[]) => {
+    if (list.filter((post) => !latest.current.posts[post.id]?.readAt).length >= PAGE_SIZE) return 0;
+    try {
+      const { data, error: rpcError } = await client.rpc("feed_top_up", { p_count: TOP_UP });
+      return !rpcError && typeof data === "number" ? data : 0;
+    } catch {
+      return 0;
+    }
+  }, [client]);
+
   /** Page in content until `target` posts are held, or the feed runs out. */
   const loadUpTo = useCallback(
     async (target: number) => {
@@ -202,6 +219,7 @@ export function useReading(client: SupabaseClient, userId: string) {
       if (active.current) setPaging(true);
       let list = held.current;
       let exhausted = false;
+      let drew = false;
 
       // try/finally, so a thrown rejection can never strand the fetching guard
       // and leave paging dead for the rest of the session.
@@ -215,8 +233,18 @@ export function useReading(client: SupabaseClient, userId: string) {
           // Keep whatever is already held rather than clearing the feed on a failure.
           if (rpcError) break;
           const fetched = coercePosts(data);
-          if (fetched.length < PAGE_SIZE) exhausted = true;
           const grown = appendPosts(list, fetched);
+          if (fetched.length < PAGE_SIZE) {
+            // The end of the feed: draw on the reserve once, then read on into what it added.
+            if (!drew) {
+              drew = true;
+              if ((await drawReserve(grown)) > 0) {
+                list = grown;
+                continue;
+              }
+            }
+            exhausted = true;
+          }
           if (grown === list) break; // A page of entirely known ids: stop rather than spin.
           list = grown;
         }
@@ -234,7 +262,7 @@ export function useReading(client: SupabaseClient, userId: string) {
         fetching.current = false;
       }
     },
-    [client, userId],
+    [client, userId, drawReserve],
   );
 
   /**
@@ -258,6 +286,7 @@ export function useReading(client: SupabaseClient, userId: string) {
       let list: Post[] = [];
       let exhausted = false;
       let ok = true;
+      let drew = false;
       try {
         for (let page = 0; page < MAX_PAGES_PER_RUN && list.length < depth && !exhausted; page += 1) {
           const { data, error: rpcError } = await client.rpc("feed_page", {
@@ -270,8 +299,18 @@ export function useReading(client: SupabaseClient, userId: string) {
             break;
           }
           const fetched = coercePosts(data);
-          if (fetched.length < PAGE_SIZE) exhausted = true;
           const grown = appendPosts(list, fetched);
+          if (fetched.length < PAGE_SIZE) {
+            // A short feed at the start of a sitting: top it up from the reserve, once, and read on.
+            if (!drew) {
+              drew = true;
+              if ((await drawReserve(grown)) > 0) {
+                list = grown;
+                continue;
+              }
+            }
+            exhausted = true;
+          }
           if (grown === list) break;
           list = grown;
         }
@@ -312,7 +351,7 @@ export function useReading(client: SupabaseClient, userId: string) {
         }
       }
     },
-    [client, userId],
+    [client, userId, drawReserve],
   );
 
   const refresh = useCallback(

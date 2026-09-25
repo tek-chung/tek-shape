@@ -1,4 +1,4 @@
-import { candidateId, checkDraft, checkExcerpt, checkReview, snapExcerpt } from "./editorial.mjs";
+import { candidateId, checkDraft, checkExcerpt, checkReview, snapExcerpt, validBlocks } from "./editorial.mjs";
 import { ANY_HOST, blocksText, digest, discoverHTMLItems, discoverXMLItems, extractArticle, feedBlocks, fetchSource, pageExcerpt, plainTitle, safeURL, splitSentences } from "./sources.mjs";
 import { ModelChainError, draftSchema, reviewSchema } from "./model.mjs";
 import { TAXONOMY_PROMPT, cleanSubtopic, placeOf } from "./taxonomy.mjs";
@@ -169,7 +169,7 @@ export const publisherOf = (group, url) =>
  * provider ends the run cleanly, keeping everything saved so far.
  */
 export async function draftCandidates({ groups, generate, save, concepts = [], preferences = [], retrieve = fetchSource, limit = 4, known = new Set(), sourceChars = 10000, checks = "strict", onProgress = () => {},
-  plan = null, triage = null, guidance = () => undefined }) {
+  plan = null, triage = null, guidance = () => undefined, attachBodies = null }) {
   validateSources(groups);
   const metrics = { discovered:0, retrieved:0, checked:0, held:0, sourceFailures:0, alreadyDrafted:0, modelFailures:0, stopped:null, triaged:0, skippedByTaste:0, excerpts:0 };
   const seen = new Set();
@@ -187,6 +187,13 @@ export async function draftCandidates({ groups, generate, save, concepts = [], p
     metrics.alreadyDrafted += found.urls.length - fresh.length;
     for (const [url, item] of found.titles) if (!details.has(url)) details.set(url, item);
     lists.push({ group, turns, ...found, urls: fresh });
+    // Posts drafted before this source kept bodies (or published before the database could hold them) get
+    // the article now, while the feed still carries it. No AI involved: the feed's own text, as blocks.
+    if (attachBodies && group.keepBody) {
+      const bodies = feedArticles(found.titles);
+      const attached = bodies.length ? await attachBodies(bodies) : 0;
+      if (attached) report(group.publisher, `saved the full text for ${attached} earlier post${attached === 1 ? "" : "s"}`, "feed");
+    }
   }
   // Excerpt sources first: they cost no AI quota, so a run that later runs out of quota still brings them in.
   // They never reach triage or a model.
@@ -375,6 +382,10 @@ async function draftOne({ source, concepts, preferences, generate, save, metrics
 
 /** Enough of a feed's article to be worth reading in the app: at least 1,200 characters of text. */
 const keepable = (blocks) => (blocks.length && blocksText(blocks).length >= 1200 ? blocks : null);
+
+/** The whole articles a discovered feed carries (url → saved-article blocks), for posts that lack one. */
+export const feedArticles = (titles) => [...titles].filter(([, item]) => item.body)
+  .map(([url, item]) => ({ url, body: keepable(feedBlocks(item.body)) })).filter((entry) => entry.body && validBlocks(entry.body));
 
 /** A source built from the feed's copy of an article, for when the page itself is gated. */
 function feedSource(citation, blocks, maxChars) {

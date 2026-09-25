@@ -391,6 +391,26 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
   `kind` (needs 202609300001). Log lines for excerpts read `[excerpt, no AI]`; `publishChecked` reports
   `excerptsPublished` and warns when the excerpt migration is missing; `prepare` reports `unreadBefore`;
   `status` lists excerpts per publisher (saved / published / in feed / unread). Content tests 109.
+- SMR posts drafted before `keepBody` (or published before 202609300001) had no saved article. Each run
+  now offers every keepBody feed's current articles to `attachBodies`, which saves them onto published
+  posts citing that URL with `body is null` (`feedArticles` in engine.mjs, `bodyAttacher` in run.mjs);
+  `npm run content -- bodies` does just that, no AI. Only articles still in the feed can be recovered
+  (FeedBurner carries the latest ~8). Content tests 110.
+
+## 5p. The feed refills itself (25 Sep 2026)
+
+- Owner saw many published posts never reach the feed. Not the taste model: `prepare` only tops up to
+  `CONTENT_QUEUE_TARGET` (24) unread, once per 3-hour run. At 17:21 ~21 were unread (3 added); at 21:39 ~26
+  (none added); the owner then read ~20 at 01:00. ~200 drafts/day far outpace reading.
+- Migration `202610010001_feed_reserve.sql`: `feed_reserve` (engine-written, not readable by the reader)
+  and `feed_top_up(p_count ≤ 30)`, security definer, caller's rows only, published+checked posts not yet
+  queued, same advisory lock as `append_feed`. `prepare` ranks the next `CONTENT_RESERVE` (default 60)
+  posts after its picks with the same `rankQueue` and replaces the reserve (reports `reserve`, or a hint if
+  the migration is missing). `check` covers the migration.
+- `useReading`: at the end of the feed (in `loadUpTo` or a sitting's `rebuild`), with fewer than a page of
+  unread posts held, `drawReserve` calls `feed_top_up(10)` once per load and reads on; an idle feed never
+  grows because the unread check fails. Tests: `tests/sql/feed-reserve.test.mjs` (SQL 60).
+- Lever not pulled: `CONTENT_DRAFT_LIMIT` could drop to ~12 to stop spending quota on posts never read.
 
 ## 6. Next steps
 
