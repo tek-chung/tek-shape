@@ -77,3 +77,16 @@ test("a saved article is plain text blocks; anything else is dropped", () => {
   assert.equal(coerceBlocks([]), null);
   assert.equal(coerceBlocks({ t: "p", text: "x" }), null);
 });
+
+test("reading time adds up in the outbox, is capped per report, and can be stripped for an older server", async () => {
+  const { MAX_DWELL_MS, coerceOutbox, mergePatch, withoutDwell } = await import("../../src/lib/storage.ts");
+  assert.deepEqual(mergePatch({ seen: true, dwell: 1200 }, { dwell: 800 }), { seen: true, dwell: 2000 });
+  assert.deepEqual(mergePatch({ rating: "more" }, { dwell: 500 }), { rating: "more", dwell: 500 });
+  assert.deepEqual(mergePatch({ dwell: 400 }, { rating: "harder" }), { dwell: 400, rating: "harder" }, "a later tap keeps the time");
+  assert.equal(mergePatch({ dwell: MAX_DWELL_MS - 10 }, { dwell: 5000 }).dwell, MAX_DWELL_MS);
+  assert.deepEqual(withoutDwell({ seen: true, dwell: 300 }), { seen: true });
+  assert.equal(withoutDwell({ dwell: 300 }), null);
+  assert.equal(applyPatch(emptyPost, { dwell: 3000 }, at("10:00")).readAt, undefined, "time in view is not a read");
+  const outbox = coerceOutbox({ posts: { a: { dwell: 1500.4 }, b: { dwell: -3 }, c: { dwell: "9" }, d: { dwell: 9e9, seen: true } }, progress: null });
+  assert.deepEqual(outbox.posts, { a: { dwell: 1500 }, d: { seen: true, dwell: MAX_DWELL_MS } });
+});

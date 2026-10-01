@@ -4,11 +4,15 @@ import { createClient } from "@supabase/supabase-js";
 const PAGE_SIZE = 8;
 
 // Service access to the DISPOSABLE test project only (global setup refuses the personal one).
-const admin = createClient(process.env.PLAYWRIGHT_SUPABASE_URL ?? "", process.env.PLAYWRIGHT_SUPABASE_SERVICE_ROLE_KEY ?? "", {
+// Made on first use, not at import: Playwright imports this file before global setup runs, and an unset URL
+// would otherwise fail here with a bare "Invalid supabaseUrl" instead of global setup's explanation.
+const connect = () => createClient(process.env.PLAYWRIGHT_SUPABASE_URL ?? "", process.env.PLAYWRIGHT_SUPABASE_SERVICE_ROLE_KEY ?? "", {
   auth: { persistSession: false, autoRefreshToken: false },
 });
+let client: ReturnType<typeof connect> | null = null;
+const admin = () => (client ??= connect());
 async function testUserId() {
-  const { data } = await admin.auth.admin.listUsers({ perPage: 200 });
+  const { data } = await admin().auth.admin.listUsers({ perPage: 200 });
   const users: { id: string; email?: string }[] = data?.users ?? [];
   return users.find((user) => user.email === "playwright@tek-shape.test")!.id;
 }
@@ -17,7 +21,7 @@ async function testUserId() {
 // control count as read, so start every test with a clean slate (test account, disposable project);
 // otherwise the first card would differ from test to test.
 test.beforeEach(async () => {
-  await admin.from("user_post_state").delete().eq("user_id", await testUserId());
+  await admin().from("user_post_state").delete().eq("user_id", await testUserId());
 });
 
 /** The feed is ready once the first page of content has arrived. */
@@ -72,7 +76,7 @@ test("a post rated on an older app, with no read time recorded, leaves the feed 
   await openFeed(page);
   const first = await card(page).getAttribute("id");
   // As an older version of the app left it: rated, but never marked read.
-  await admin
+  await admin()
     .from("user_post_state")
     .upsert({ user_id: await testUserId(), post_id: first!, rating: "harder", read_at: null }, { onConflict: "user_id,post_id" });
   await page.getByRole("button", { name: /Refresh/ }).click();
@@ -104,7 +108,7 @@ test("the Library holds saved posts and empties cleanly", async ({ page }) => {
 test("posts read on an earlier visit move from the feed to Read", async ({ page }) => {
   await openFeed(page);
   const first = await card(page).getAttribute("id");
-  await admin
+  await admin()
     .from("user_post_state")
     .upsert({ user_id: await testUserId(), post_id: first!, read_at: "2026-01-01T00:00:00Z" }, { onConflict: "user_id,post_id" });
   await page.reload();
@@ -117,7 +121,7 @@ test("posts read on an earlier visit move from the feed to Read", async ({ page 
 test("Refresh moves posts read earlier to Read without reloading the page", async ({ page }) => {
   await openFeed(page);
   const first = await card(page).getAttribute("id");
-  await admin
+  await admin()
     .from("user_post_state")
     .upsert({ user_id: await testUserId(), post_id: first!, read_at: "2026-01-01T00:00:00Z" }, { onConflict: "user_id,post_id" });
   await page.getByRole("button", { name: /Refresh/ }).click();

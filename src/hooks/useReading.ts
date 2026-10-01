@@ -23,6 +23,7 @@ import {
   writeOutbox,
   writePosts,
   writeState,
+  withoutDwell,
   type Outbox,
   type PostPatch,
 } from "@/lib/storage";
@@ -101,6 +102,8 @@ export function useReading(client: SupabaseClient, userId: string) {
   // device's latest taps before it is asked what has been read.
   const flushRun = useRef<Promise<boolean> | null>(null);
   const fetching = useRef(false);
+  // Set once the server refuses reading time (before migration 202610020001), for the rest of the session.
+  const noDwell = useRef(false);
   const failures = useRef(0);
   const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Lets the retry timer reach the current flush without the callback referencing itself.
@@ -133,7 +136,14 @@ export function useReading(client: SupabaseClient, userId: string) {
     for (let pass = 0; pass < MAX_PASSES && !failed && outboxSize(outbox.current); pass += 1) {
       try {
         for (const [postId, patch] of Object.entries(outbox.current.posts)) {
-          const { error: rpcError } = await client.rpc("save_post", { p_post_id: postId, p_patch: patch });
+          // A database a migration behind refuses reading time; send the rest rather than stall the outbox.
+          const send = noDwell.current ? withoutDwell(patch) : patch;
+          let { error: rpcError } = send ? await client.rpc("save_post", { p_post_id: postId, p_patch: send }) : { error: null };
+          if (rpcError && send?.dwell !== undefined && /Invalid post patch/i.test(rpcError.message ?? "")) {
+            noDwell.current = true;
+            const rest = withoutDwell(patch);
+            ({ error: rpcError } = rest ? await client.rpc("save_post", { p_post_id: postId, p_patch: rest }) : { error: null });
+          }
           if (rpcError) {
             failed = true;
             break;

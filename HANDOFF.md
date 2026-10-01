@@ -412,6 +412,38 @@ API endpoint, request fields, status values and nullable schema form; Mistral's 
   grows because the unread check fails. Tests: `tests/sql/feed-reserve.test.mjs` (SQL 60).
 - Lever not pulled: `CONTENT_DRAFT_LIMIT` could drop to ~12 to stop spending quota on posts never read.
 
+## 5q. T-Mixer phase 0: foundations (2 Oct 2026, Claude)
+
+The recommender redesign ("T-Mixer": several candidate sources, nine predicted actions, a diversity-aware
+mixer, demand-led drafting, Your T / Dear T steering) starts with three foundations. Migration
+`202610020001_mixer_foundations.sql` (additive) covers all three. **Apply it before deploying the app.**
+
+- **20,000-row ceiling removed.** `draft()` loaded every `content_candidate` row to find drafted URLs; the
+  table grows by every draft (held or not, ~200–250 a day) and `all()` threw at 20,000, so the engine would
+  have stopped around December–February. Now: generated columns `source_url`/`source_publisher` (indexed),
+  `drafted_sources(urls, retry_before)` asked per source by `draftCandidates({ lookupKnown })` (redirects
+  included), `drafted_publishers()` for fair turns, `candidate_summary()` for `status`. `POST_COLUMNS` is
+  slimmed to what ranking reads (publisher instead of the whole citation, no text); `all()` pages by 1,000 up
+  to 200,000 rows. Without the migration the old full load runs, with a hint on stderr.
+- **Reading time.** `user_post_state.dwell_ms`; `save_post` accepts `dwell` (1–600,000 ms per report, total
+  capped at a day). Dwell is not reading and does not touch `updated_at` (taste dates evidence by it, the
+  Library sorts by it). `Feed.tsx` measures each visit (half the card on screen, or half the screen filled by
+  it, app visible; 200 ms minimum, 2 minutes maximum per visit); the outbox sums unsent time
+  (`mergePatch`). If the server refuses the patch (migration missing), `useReading` resends without dwell
+  and stops sending it for the session, so the outbox never stalls. Not yet used by the taste model.
+- **Why each post was placed.** `rankQueue` picks now carry `reasons` (`why`: favourite, excerpt, thin-area,
+  bridge, uncertain, breadth, harder, plus the numbers behind it); `prepare` stores them with
+  `ranker = "taste-1"` on `feed_queue` and `feed_reserve`, and `feed_top_up` carries them across. Reasons
+  describe the reader's taste: stored, never printed. `check` covers the migration.
+- Tests: `tests/sql/mixer-foundations.test.mjs` (5), engine lookup and redirect, placement reasons, client
+  dwell merging. SQL 65, content 112, client 7 pass in the Claude sandbox. **Not run:** lint, build,
+  Playwright, anything against the live project.
+
+Next T-Mixer phases (agreed plan, not started): 1 understanding (embeddings, idea clusters, concept graph;
+needs a choice between a local transformers.js model and Gemini's embedding API), 2 multi-head value model
+using dwell, fatigue curve, format normalisation (retires the excerpt slot), 3 mixer with seven sources,
+4 demand-led drafting, 5 surfaces (Why this?, Your T, Dear T, Latest, Briefing ring, Atlas, Tracks).
+
 ## 6. Next steps
 
 1. **User:** `npm run lint` and `npm run build`.

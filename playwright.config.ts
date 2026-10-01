@@ -1,7 +1,11 @@
 import { defineConfig } from "@playwright/test";
 import { STORAGE_STATE } from "./tests/global-setup";
-import nextEnv from "@next/env";
+import * as nextEnvModule from "@next/env";
 
+// @next/env is CommonJS marked as an ES module, and Playwright compiles this file to CommonJS: there the
+// default import is undefined and the functions sit on the namespace. Native ESM (the scripts) is the reverse.
+type NextEnv = typeof nextEnvModule;
+const nextEnv: NextEnv = (nextEnvModule as NextEnv & { default?: NextEnv }).default ?? nextEnvModule;
 nextEnv.loadEnvConfig(process.cwd());
 
 const externalURL = process.env.PLAYWRIGHT_BASE_URL;

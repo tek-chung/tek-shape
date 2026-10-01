@@ -274,8 +274,27 @@ function expected(model, post, known) {
     const age = (model.now - Date.parse(post.article_date ?? post.reviewed_at ?? model.now)) / DAY;
     value *= 1 - clamp(0, 0.3, age * 0.04);
   }
-  return { value, e, choice, novelty };
+  return { value, e, choice, novelty, fit };
 }
+
+/** Names the ranker that placed a post, stored with each placement so rankers can be compared later. */
+export const RANKER = "taste-1";
+const r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
+
+/**
+ * Why a post was placed, in a few numbers and one plain reason code, stored with the placement (never
+ * logged: it describes the reader's taste). Codes: favourite, excerpt, thin-area, bridge, uncertain,
+ * breadth, harder.
+ */
+function reasonsFor(pick, slot, why) {
+  return {
+    v: 1, slot, why, field: pick.field, umbrella: pick.umbrella,
+    value: r2(pick.fav), explore: r2(pick.explore), mean: r2(pick.mean), novelty: r2(pick.novelty), fit: r2(pick.fit),
+    difficulty: pick.post.difficulty ?? null, target: r2(pick.target), gap: r2(pick.gap), bridge: r2(pick.bridge),
+    ...(pick.choice ? { steer: pick.choice } : {}),
+  };
+}
+const exploreReason = (pick) => (pick.gap >= 0.5 ? "thin-area" : pick.bridge >= 0.25 ? "bridge" : "uncertain");
 
 /** Where to put the batch's specials (explorations and the stretch), spread out, never at the very top. */
 function layout(batch, explores) {
@@ -321,9 +340,15 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
     const weakness = clamp(0, 1, (model.prior - x.e.umbrellaMean) / 0.25);
     d.fav = x.value;
     d.mean = x.e.mean;
+    d.novelty = x.novelty;
+    d.fit = x.fit;
+    d.choice = x.choice;
+    d.gap = model.gap(d.umbrella);
+    d.bridge = model.bridge(concepts);
     d.explore = (theta + 0.35 * model.gap(d.umbrella) + 0.2 * weakness + (weakArea ? 0.3 : 0.15) * model.bridge(concepts)
       - 0.3 * model.avoid(concepts) + 0.1 * x.e.uncertainty) * (1 - 0.5 * comfort) * model.multiplier(x.choice);
     const target = model.targetDifficulty(d.field);
+    d.target = target;
     d.harderStretch = (post.difficulty ?? 2) >= target + 0.5 && target > 2.5;
     pool.push(d);
   }
@@ -360,23 +385,24 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
     for (const [index, slot] of slots.entries()) {
       if (!pool.length) break;
       let pick = null;
+      let why = slot;
       if (index === excerptAt) {
         const offer = best((c) => c.fav, (c) => c.excerpt);
-        if (offer && offer.fav >= 0.6 * model.prior) pick = offer;
+        if (offer && offer.fav >= 0.6 * model.prior) { pick = offer; why = "excerpt"; }
       }
       if (!pick && slot === "stretch") {
         // Breadth floor first: an area with posts waiting that has not appeared recently.
         const due = new Set(pool.map((c) => c.umbrella).filter((u) => u !== "other" && !recentUmbrellas.has(u)));
-        pick = (due.size && best((c) => c.explore, (c) => due.has(c.umbrella)))
-          || best((c) => c.fav, (c) => c.harderStretch)
-          || best((c) => c.explore);
-      } else if (!pick && slot === "explore") pick = best((c) => c.explore);
+        if (due.size && (pick = best((c) => c.explore, (c) => due.has(c.umbrella)))) why = "breadth";
+        else if ((pick = best((c) => c.fav, (c) => c.harderStretch))) why = "harder";
+        else if ((pick = best((c) => c.explore))) why = exploreReason(pick);
+      } else if (!pick && slot === "explore") { pick = best((c) => c.explore); if (pick) why = exploreReason(pick); }
       else if (!pick) pick = best((c) => c.fav);
       if (!pick) break;
       pool.splice(pool.indexOf(pick), 1);
       history.push(pick); recentUmbrellas.add(pick.umbrella);
       for (const c of pick.post.concept_ids ?? []) known.add(c);
-      picks.push({ id: pick.id, slot });
+      picks.push({ id: pick.id, slot, reasons: reasonsFor(pick, slot, why) });
     }
   }
   return picks;

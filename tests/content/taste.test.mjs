@@ -92,6 +92,28 @@ test("the feed is built in batches: mostly favourites, some explorations, one st
   assert.equal(new Set(picks.map((p) => p.id)).size, 10);
 });
 
+test("every placement says why, in a small record fit to store and never to log", () => {
+  const history = [];
+  const fields = ["algebra-number-theory", "quantum-physics", "ethics", "artificial-intelligence", "modern-history", "neuroscience"];
+  for (const f of fields) for (let i = 0; i < 3; i++) history.push(post(f, `${f} ${i}`));
+  const model = buildTaste({ posts: history, states: history.map((p) => liked(p)), now });
+  const candidates = [...fields, "earth-sciences", "law-rights"].flatMap((f) => [1, 2, 3].map((i) => post(f, `${f} new ${i}`)));
+  const picks = rankQueue({ model, candidates, assigned: history, need: 10, now, random: seededRandom(5) });
+  const codes = new Set(["favourite", "excerpt", "thin-area", "bridge", "uncertain", "breadth", "harder"]);
+  for (const pick of picks) {
+    assert.equal(pick.reasons.v, 1);
+    assert.equal(pick.reasons.slot, pick.slot);
+    assert.ok(codes.has(pick.reasons.why), pick.reasons.why);
+    assert.ok(JSON.stringify(pick.reasons).length < 2000, "fits the database's limit");
+    if (pick.slot === "favourite") assert.ok(["favourite", "excerpt"].includes(pick.reasons.why));
+  }
+  // Politics & society is missing from the reading so far: it is placed, and placed as breadth or a thin area.
+  const unread = picks.find((p) => p.reasons.field === "law-rights");
+  assert.ok(unread, "the unread area appears in the batch");
+  assert.ok(["breadth", "thin-area"].includes(unread.reasons.why), unread.reasons.why);
+  assert.equal(unread.reasons.gap, 1);
+});
+
 test("paused subtopics, stale news and true repeats never reach the feed", () => {
   const a = post("probability-statistics", "Survey Methods"), b = post("probability-statistics", "Survey Methods");
   const model = buildTaste({ posts: [a, b], states: [disliked(a), disliked(b)], now });

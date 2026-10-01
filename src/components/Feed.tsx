@@ -15,6 +15,10 @@ import { ratingLabels } from "./FeedbackBar";
 
 type View = "feed" | "library" | "read" | "map";
 
+/** Shorter than this is not a look at all; longer than this in one go is not attention. */
+const DWELL_MIN_MS = 200;
+const DWELL_VISIT_MAX_MS = 120_000;
+
 export function Feed({
   client,
   userId,
@@ -132,6 +136,51 @@ export function Feed({
     return () => {
       observer.disconnect();
       timers.forEach(clearTimeout);
+    };
+  }, [ready, view, posts]);
+
+  // Reading time: how long each post is in view (half of it on screen, or half the screen filled by it), with
+  // the app visible. Reported as each visit ends, so a quick skip is recorded as well as a long read. A single
+  // visit counts at most two minutes, so a phone left on the table does not look like rapt attention.
+  useEffect(() => {
+    if (!ready || view !== "feed") return;
+    const since = new Map<string, number>();
+    const stop = (id: string) => {
+      const start = since.get(id);
+      if (start === undefined) return;
+      since.delete(id);
+      const ms = Math.min(DWELL_VISIT_MAX_MS, Date.now() - start);
+      if (ms >= DWELL_MIN_MS) current.current.savePost(id, { dwell: Math.round(ms) });
+    };
+    const inView = (entry: IntersectionObserverEntry) =>
+      entry.isIntersecting && (entry.intersectionRatio >= 0.5 || entry.intersectionRect.height >= window.innerHeight * 0.5);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = (entry.target as HTMLElement).dataset.postId;
+          if (!id) continue;
+          if (inView(entry) && document.visibilityState === "visible") {
+            if (!since.has(id)) since.set(id, Date.now());
+          } else stop(id);
+        }
+      },
+      { threshold: [0, 0.25, 0.5, 0.75, 1] },
+    );
+    const watch = () => document.querySelectorAll<HTMLElement>("article[data-post-id]").forEach((element) => observer.observe(element));
+    watch();
+    // Hidden: end every visit now. Visible again: observe afresh, which reports what is on screen.
+    function visibility() {
+      if (document.visibilityState === "hidden") [...since.keys()].forEach(stop);
+      else {
+        observer.disconnect();
+        watch();
+      }
+    }
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      observer.disconnect();
+      [...since.keys()].forEach(stop);
     };
   }, [ready, view, posts]);
 

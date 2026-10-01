@@ -436,6 +436,18 @@ test("a source already drafted on an earlier run costs no model call", async () 
   const metrics = await draftCandidates({ groups:[group], retrieve:async()=>response, known:new Set([source.url]), generate:async()=>{ calls++; }, save:async()=>{} });
   assert.equal(calls, 0); assert.equal(metrics.alreadyDrafted, 1);
 });
+test("drafted sources can be looked up per run rather than loaded whole, redirects included", async () => {
+  let calls = 0; const asked = [];
+  const lookupKnown = async (urls) => { asked.push(...urls); return urls.filter((url) => url === source.url); };
+  const metrics = await draftCandidates({ groups:[group], retrieve:async()=>response, lookupKnown, generate:async()=>{ calls++; }, save:async()=>{} });
+  assert.equal(calls, 0); assert.equal(metrics.alreadyDrafted, 1);
+  assert.deepEqual(asked, [source.url], "only what the run discovered is asked about");
+  // A link that redirects to an article drafted under its old address is caught after the fetch.
+  const moved = { ...group, articles:["https://example.org/old-link"] };
+  calls = 0;
+  const again = await draftCandidates({ groups:[moved], retrieve:async()=>response, lookupKnown, generate:async()=>{ calls++; }, save:async()=>{} });
+  assert.equal(calls, 0); assert.equal(again.alreadyDrafted, 1);
+});
 test("one failed article does not end the run", async () => {
   const two = { ...group, articles:["https://example.org/one","https://example.org/two"] };
   let calls = 0; const saved = [];

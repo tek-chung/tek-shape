@@ -3,12 +3,21 @@ import type { BodyBlock, Post, PostSource, PostState, Rating, ReadingPosition, R
 export const emptyPost: PostState = { rating: null, bookmarked: false, expanded: false };
 export const initialState: ReadingState = { posts: {}, loadedCount: 0, position: null, total: 0 };
 
-/** Fields a device may change. `seen`, `read` and `opened` are one-way flags the server turns into timestamps. */
+/**
+ * Fields a device may change. `seen`, `read` and `opened` are one-way flags the server turns into timestamps.
+ * `dwell` is milliseconds the post was in view since the last report, which the server adds to its total.
+ */
 export type PostPatch = Partial<Pick<PostState, "rating" | "bookmarked" | "expanded">> & {
   seen?: true;
   read?: true;
   opened?: true;
+  dwell?: number;
 };
+
+/** The most reading time one report may carry; `save_post` refuses more. Unsent time beyond it is dropped. */
+export const MAX_DWELL_MS = 600_000;
+const coerceDwell = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= 1 ? Math.min(MAX_DWELL_MS, Math.round(value)) : null;
 
 /** Writes made on this device that the server has not acknowledged yet. */
 export interface Outbox {
@@ -222,6 +231,8 @@ function coercePatch(value: unknown): PostPatch | null {
   if (value.seen === true) patch.seen = true;
   if (value.read === true) patch.read = true;
   if (value.opened === true) patch.opened = true;
+  const dwell = coerceDwell(value.dwell);
+  if (dwell !== null) patch.dwell = dwell;
   return Object.keys(patch).length ? patch : null;
 }
 
@@ -301,8 +312,24 @@ export function readBefore(state: ReadingState | null, id: string, since: string
   return !!post.rating || post.bookmarked || post.expanded || !!post.deeperOpenedAt || !!post.openedAt;
 }
 
-/** Later writes win per field; `seen` and `read` are sticky because the server only ever sets them once. */
-export const mergePatch = (base: PostPatch | undefined, patch: PostPatch): PostPatch => ({ ...base, ...patch });
+/**
+ * Later writes win per field; `seen` and `read` are sticky because the server only ever sets them once.
+ * Reading time adds up, so time spent offline is reported in one go when the connection returns.
+ */
+export function mergePatch(base: PostPatch | undefined, patch: PostPatch): PostPatch {
+  const merged: PostPatch = { ...base, ...patch };
+  const dwell = (base?.dwell ?? 0) + (patch.dwell ?? 0);
+  if (dwell >= 1) merged.dwell = Math.min(MAX_DWELL_MS, Math.round(dwell));
+  else delete merged.dwell;
+  return merged;
+}
+
+/** The same patch without reading time, for a server that does not accept it yet (before 202610020001). */
+export function withoutDwell(patch: PostPatch): PostPatch | null {
+  const rest: PostPatch = { ...patch };
+  delete rest.dwell;
+  return Object.keys(rest).length ? rest : null;
+}
 
 /**
  * Replay everything still waiting to sync on top of a server snapshot, so a refresh never discards local
