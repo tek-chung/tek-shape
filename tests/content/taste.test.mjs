@@ -281,3 +281,40 @@ test("a publisher that already filled recent places gives way to others of simil
   const aeon = picks.filter((p) => byId.get(p.id) === "Aeon").length;
   assert.ok(aeon <= 2, `after ten Aeon posts in a row, Aeon takes at most two of six (${aeon})`);
 });
+
+test("an idea cluster carries taste across subtopic names", () => {
+  // Within ethics the reader loves one idea (cluster 7) and dislikes another (cluster 3).
+  const loved = [1, 2, 3, 4].map((i) => post("ethics", `Moral Luck ${i}`));
+  const dull = [1, 2, 3, 4].map((i) => post("ethics", `Duty ${i}`));
+  const clusters = new Map([...loved.map((p) => [p.id, 7]), ...dull.map((p) => [p.id, 3])]);
+  const model = buildTaste({ posts: [...loved, ...dull], states: [...loved.map(liked), ...dull.map(disliked)], now, clusters });
+  const plain = model.estimate("ethics", "Fortune and Blame").mean;
+  const sameIdea = model.estimate("ethics", "Fortune and Blame", 7).mean;
+  const otherIdea = model.estimate("ethics", "Fortune and Blame", 3).mean;
+  assert.ok(sameIdea > plain + 0.05, `a new name for a loved idea starts higher (${sameIdea} vs ${plain})`);
+  assert.ok(otherIdea < plain - 0.05, `a new name for a disliked idea starts lower (${otherIdea} vs ${plain})`);
+  assert.equal(model.estimate("ethics", "Fortune and Blame", 99).mean, plain, "an unread cluster changes nothing");
+  assert.equal(model.clusterOf(loved[0].id), 7);
+});
+
+test("the same idea in other words is not placed twice, unless it goes deeper", async () => {
+  const { normalise } = await import("../../scripts/content/understand.mjs");
+  const unit = (i, j = null) => { const v = new Float32Array(384); v[i] = 1; if (j !== null) v[j] = 0.25; return normalise(v); };
+  const seen = post("ethics", "Moral Luck", { difficulty: 2 });
+  const fields = ["algebra-number-theory", "quantum-physics", "artificial-intelligence", "modern-history", "neuroscience"];
+  const history = [seen, ...fields.map((f) => post(f, `${f} 0`))];
+  const model = buildTaste({ posts: history, states: history.map(liked), now });
+  const echo = post("ethics", "Fortune and Blame", { difficulty: 2 });
+  const deeper = post("ethics", "Constitutive Luck", { difficulty: 4 });
+  const twinA = post("neuroscience", "Place Cells"), twinB = post("neuroscience", "Grid Cells");
+  const others = fields.map((f) => post(f, `${f} new`));
+  const vectors = new Map([[seen.id, unit(1)], [echo.id, unit(1, 2)], [deeper.id, unit(1, 3)], [twinA.id, unit(50)], [twinB.id, unit(50, 51)],
+    ...[...history.slice(1), ...others].map((p, i) => [p.id, unit(100 + i)])]);
+  const candidates = [echo, deeper, twinA, twinB, ...others];
+  const picks = rankQueue({ model, candidates, assigned: history, need: 10, now, random: seededRandom(3), vectors }).map((p) => p.id);
+  assert.ok(!picks.includes(echo.id), "a restatement of a post already in the feed is dropped");
+  assert.ok(picks.includes(deeper.id), "a harder take on it is the next step, and stays");
+  assert.equal([twinA.id, twinB.id].filter((id) => picks.includes(id)).length, 1, "of two waiting twins, one is placed");
+  const without = rankQueue({ model, candidates, assigned: history, need: 10, now, random: seededRandom(3) }).map((p) => p.id);
+  assert.ok(without.includes(echo.id), "without vectors the old rules apply");
+});

@@ -155,11 +155,19 @@ All in `scripts/content/taste.mjs` (pure functions; tests in `tests/content/tast
    top third get two turns). One **triage** call per run files the next headlines; resting subtopics are
    skipped before any drafting call, and each source's most promising article is drafted first with its
    field's target difficulty.
-6. **Reasons and reading time** (needs `202610020001_mixer_foundations.sql`): every post placed in the feed
+6. **Understanding** (`scripts/content/understand.mjs`, needs `202610030001_understanding.sql` and
+   `npm install`): each published post (never an excerpt) is embedded by a small multilingual model,
+   `Xenova/paraphrase-multilingual-MiniLM-L12-v2`, run locally — no API, no quota, ~120 MB downloaded once
+   (cached in `.cache/transformers`, and by the workflow). Posts are grouped into idea clusters (about 25 posts
+   each, rebuilt weekly or when the catalogue grows by a fifth, named after their commonest subtopics). Taste
+   learnt on a cluster carries to new subtopic names inside it; a candidate at cosine ≥ 0.9 to a post already
+   in the feed is dropped unless it is harder; posts close to the last five placed (≥ 0.75) are scored down.
+   `understand` prints the spread of nearest-neighbour similarities so those thresholds can be calibrated.
+7. **Reasons and reading time** (needs `202610020001_mixer_foundations.sql`): every post placed in the feed
    or reserve stores why (`reasons.why`: favourite, excerpt, thin-area, bridge, uncertain, breadth, harder)
    and which ranker placed it, and the app reports how long each post was in view (`dwell_ms`). Both are kept
    in the database only, never printed, and feed the coming T-Mixer phases.
-7. **Report card and niches**: `prepare` records each post's slot and saves a snapshot (`taste_snapshot`) that
+8. **Report card and niches**: `prepare` records each post's slot and saves a snapshot (`taste_snapshot`) that
    the Map shows: discovered niches, pauses, per-field enjoyment and the hit rates. `status` prints the same.
 
 ## Publishing
@@ -198,6 +206,7 @@ Actions tab.
 | `review <id>` | print one candidate |
 | `prepare` | append published posts to your queue |
 | `status` | candidate counts, queue depth, today's usage per provider |
+| `understand` | embed new posts with the local model and refresh idea clusters (no API calls; `cycle` does this too, unless `CONTENT_UNDERSTAND=off`) |
 | `bodies` | save the full article onto earlier posts from `keepBody` sources, while their feeds still carry it (no AI; every `cycle` does this too) |
 | `providers` | show the configured chain (never prints keys) |
 | `models` | ask each provider which models it serves now; flags retired ones |

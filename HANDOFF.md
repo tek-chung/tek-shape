@@ -457,7 +457,32 @@ No migration; pure changes in `taste.mjs`, ranker label `taste-2` on new placeme
   last checked to fail with decay switched off). The excerpt slot was kept: per-format normalisation would
   either always open batches with the lone excerpt or never place it.
 
-Next T-Mixer phases (agreed plan, not started): 1 understanding (embeddings, idea clusters, concept graph;
+## 5s. T-Mixer phase 1: understanding (3 Oct 2026, Claude)
+
+Owner chose the local model. New dev dependency `@huggingface/transformers` ^4.3.0 (lock updated with
+`--package-lock-only`; **run `npm install`**). Migration `202610030001_understanding.sql` (additive):
+`post_vec` (base64 int8 vectors, cluster) and `idea_cluster` (centroid, size, label), service role only.
+Not pgvector, deliberately: one reader's catalogue is compared in the engine, and pglite tests need no extension.
+
+- `scripts/content/understand.mjs`: `embedder()` (lazy import; `Xenova/paraphrase-multilingual-MiniLM-L12-v2`,
+  q8, mean-pooled, normalised; title + insight + first paragraph), `pack`/`unpack`, seeded spherical k-means,
+  `clusterCount` (n/25, 2–200), `clustersDue` (none, 7 days, +20%), `labelCluster` (no AI), `neighbourSpread`.
+- `run.mjs`: `understand` command (embeds up to `CONTENT_EMBED_LIMIT`=400 per run, excerpts never; rebuilds or
+  files clusters); `cycle` runs it before `prepare`, and a model/network failure only skips it
+  (`CONTENT_UNDERSTAND=off` to disable). `prepare` loads vectors and clusters (`withVectors` in its output).
+  `check` covers the migration. Workflow caches `.cache/transformers` (gitignored).
+- `taste.mjs` (ranker `taste-3`): `buildTaste({ clusters })` adds a `k:<cluster>` rung blended into
+  `estimate(field, subtopic, cluster)` by λ = wc / (wc + ws + 3); `rankQueue({ vectors })` drops candidates at
+  cosine ≥ 0.9 to anything in the last 500 placed unless harder, removes a placed post's waiting twins, and
+  scores down closeness ≥ 0.75 to the last five placed (up to ×0.5).
+- **Thresholds are uncalibrated**: the Claude sandbox cannot reach huggingface.co, so no real embedding has
+  been computed. After the first `understand`, check `spread` (p50/p90/p99 nearest-neighbour similarity,
+  `aboveDuplicate`) and move `UNDERSTANDING.duplicate`/`near` if needed.
+- Tests: content 123 (understand 6, clusters and idea repeats in taste), SQL 66. Not run: the real model.
+
+Next T-Mixer phases (agreed plan, not started): 1b concept graph (canonical concepts, `assumes` in the draft
+schema, depth ladders), 3 mixer with seven sources, 4 demand-led drafting (headline embeddings), 5 surfaces.
+Earlier list, for reference: 1 understanding (embeddings, idea clusters, concept graph;
 needs a choice between a local transformers.js model and Gemini's embedding API), 2 multi-head value model
 using dwell, fatigue curve, format normalisation (retires the excerpt slot), 3 mixer with seven sources,
 4 demand-led drafting, 5 surfaces (Why this?, Your T, Dear T, Latest, Briefing ring, Atlas, Tracks).

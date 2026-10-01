@@ -4,12 +4,13 @@ import nextEnv from "@next/env";
 import { CLASSIFY_RULES, DRAFT_INSTRUCTION, discover, draftCandidates, feedArticles, modelSource, publisherOf, settleDraft, validateSources } from "./engine.mjs";
 import { extractArticle, fetchSource, pageExcerpt } from "./sources.mjs";
 import { ModelChainError, classifySchema, draftSchema, generateJSON, liveModels, modelConfig, triageSchema } from "./model.mjs";
-import { RANKER, buildTaste, judgeTopic, planSources, promptSummary, rankQueue, snapshotOf, sourceOf } from "./taste.mjs";
+import { RANKER, buildTaste, seededRandom, judgeTopic, planSources, promptSummary, rankQueue, snapshotOf, sourceOf } from "./taste.mjs";
 import { cleanSubtopic, placeOf } from "./taxonomy.mjs";
+import { DIMS, EMBED_MODEL, clusterCount, clustersDue, embedder, kmeans, labelCluster, nearestCentroid, neighbourSpread, pack, postText, unpack } from "./understand.mjs";
 import { checkDraft, checkExcerpt, checkReview, excerptFound, recentConcepts } from "./editorial.mjs";
 
 nextEnv.loadEnvConfig(process.cwd());
-const COMMANDS = ["check", "probe", "draft", "review", "publish", "publish-checked", "prepare", "cycle", "classify", "bodies", "status", "providers", "models"];
+const COMMANDS = ["check", "probe", "draft", "review", "publish", "publish-checked", "prepare", "cycle", "classify", "bodies", "understand", "status", "providers", "models"];
 const [command = "help", id, note] = process.argv.slice(2);
 if (command === "help" || !COMMANDS.includes(command)) {
   console.log(`Content engine. See docs/content-engine.md.
@@ -25,6 +26,7 @@ if (command === "help" || !COMMANDS.includes(command)) {
   prepare            append published posts to the reading queue
   classify           file older posts (still under Other) in the subject map; one small AI call each
   bodies             save the full article for earlier posts from sources that keep bodies (no AI)
+  understand         embed new posts with the local model and refresh idea clusters (no API calls)
   status             candidate counts, queue depth, today's per-provider usage
   providers          show the configured provider chain (never prints keys)
   models             ask each provider which models it serves now, and flag retired ones`);
@@ -54,7 +56,7 @@ const missingMigration = (error) => /could not find the function|schema cache|do
 async function all(table, columns = "*", limit = 200_000) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
-    const order = { feed_queue: "position", user_post_state: "post_id", topic_preference: "key" }[table] ?? "id";
+    const order = { feed_queue: "position", user_post_state: "post_id", topic_preference: "key", post_vec: "post_id" }[table] ?? "id";
     const page = await result(db.from(table).select(columns).order(order).range(from, from + 999));
     rows.push(...page);
     if (page.length < 1000) return rows;
@@ -80,9 +82,91 @@ async function loadSources() {
 }
 
 /** The reader's taste, from everything they have done and every steer they have given. */
-async function loadTaste(posts, states) {
+async function loadTaste(posts, states, clusters = new Map()) {
   const [prefs, queue] = await Promise.all([all("topic_preference"), all("feed_queue")]);
-  return { model: buildTaste({ posts, states, prefs, queue, now: Date.now() }), queue };
+  return { model: buildTaste({ posts, states, prefs, queue, now: Date.now(), clusters }), queue };
+}
+
+/** Post vectors and idea clusters from the current model, or nothing before migration 202610030001. */
+async function loadUnderstanding() {
+  const vectors = new Map(), clusters = new Map();
+  try {
+    for (const row of await all("post_vec", "post_id,model,vec,cluster")) {
+      if (row.model !== EMBED_MODEL) continue;
+      const vec = unpack(row.vec);
+      if (vec) vectors.set(row.post_id, vec);
+      if (Number.isInteger(row.cluster)) clusters.set(row.post_id, row.cluster);
+    }
+  } catch (error) {
+    if (!missingMigration(error)) throw error;
+  }
+  return { vectors, clusters };
+}
+
+/**
+ * The `understand` command: embed published posts that have no vector yet (excerpts never: their terms rule
+ * out AI use), then rebuild the idea clusters when due, or file new posts into the nearest one. Prints counts
+ * and the spread of nearest-neighbour similarities only, never text or labels.
+ */
+async function understand() {
+  const limit = setting("CONTENT_EMBED_LIMIT", 400, { min: 0, max: 5000 });
+  const metrics = { pending: 0, embedded: 0, clusters: 0, reclustered: false, filed: 0, spread: null };
+  const have = new Set((await all("post_vec", "post_id,model")).filter((r) => r.model === EMBED_MODEL).map((r) => r.post_id));
+  const pending = (await all("post", "id,kind,status"))
+    .filter((p) => ["published", "sample"].includes(p.status) && p.kind !== "excerpt" && !have.has(p.id)).map((p) => p.id);
+  metrics.pending = pending.length;
+  const todo = pending.slice(0, limit);
+  if (todo.length) {
+    const embed = await embedder();
+    for (let i = 0; i < todo.length; i += 50) {
+      const rows = await result(db.from("post").select("id,title,insight,explanation").in("id", todo.slice(i, i + 50)));
+      const vecs = await embed(rows.map(postText));
+      const at = new Date().toISOString();
+      await result(db.from("post_vec").upsert(rows.map((r, j) => ({ post_id: r.id, model: EMBED_MODEL, dims: DIMS, vec: pack(vecs[j]), cluster: null, updated_at: at })), { onConflict: "post_id" }));
+      metrics.embedded += rows.length;
+      console.error(`[understand] ${metrics.embedded}/${todo.length} embedded`);
+    }
+  }
+
+  const stored = (await all("post_vec", "post_id,model,dims,vec,cluster")).filter((r) => r.model === EMBED_MODEL).map((r) => ({ ...r, v: unpack(r.vec) })).filter((r) => r.v);
+  const clusters = (await all("idea_cluster", "id,model,centroid,size,updated_at")).filter((c) => c.model === EMBED_MODEL);
+  const save = async (rows) => { for (let i = 0; i < rows.length; i += 500) await result(db.from("post_vec").upsert(rows.slice(i, i + 500), { onConflict: "post_id" })); };
+  const row = (r, cluster) => ({ post_id: r.post_id, model: r.model, dims: r.dims, vec: r.vec, cluster, updated_at: new Date().toISOString() });
+  if (clustersDue({ clusters, vectors: stored.length })) {
+    // Seeded by the catalogue size, so a rerun on the same posts builds the same clusters.
+    const { centroids, assign } = kmeans(stored.map((r) => r.v), clusterCount(stored.length), seededRandom(stored.length));
+    const subtopic = new Map((await all("post", "id,subtopic")).map((p) => [p.id, p.subtopic]));
+    const members = centroids.map(() => []);
+    stored.forEach((r, i) => members[assign[i]].push({ subtopic: subtopic.get(r.post_id) }));
+    const at = new Date().toISOString();
+    await result(db.from("idea_cluster").delete().gte("id", 0));
+    await result(db.from("idea_cluster").insert(centroids.map((c, id) => ({ id, model: EMBED_MODEL, centroid: pack(c), size: members[id].length, label: labelCluster(members[id]), updated_at: at }))));
+    await save(stored.map((r, i) => row(r, assign[i])));
+    metrics.reclustered = true;
+    metrics.clusters = centroids.length;
+  } else {
+    const centroids = clusters.sort((a, b) => a.id - b.id).map((c) => unpack(c.centroid));
+    const ids = clusters.map((c) => c.id);
+    const unfiled = stored.filter((r) => !Number.isInteger(r.cluster));
+    if (unfiled.length && centroids.every(Boolean)) await save(unfiled.map((r) => row(r, ids[nearestCentroid(r.v, centroids)])));
+    metrics.filed = unfiled.length;
+    metrics.clusters = clusters.length;
+  }
+  metrics.spread = neighbourSpread(stored.map((r) => r.v));
+  return metrics;
+}
+
+/** In `cycle`, understanding is a bonus: a failed model download must not stop the posts arriving. */
+async function understandIfOn() {
+  if (/^off$/i.test(process.env.CONTENT_UNDERSTAND ?? "")) return { skipped: "CONTENT_UNDERSTAND=off" };
+  try {
+    return await understand();
+  } catch (error) {
+    if (missingMigration(error)) return { skipped: "apply supabase/migrations/202610030001_understanding.sql" };
+    // Our own wording only: a model or network error could quote anything.
+    console.error("Understanding skipped this run (model or network unavailable); posts are ranked without it.");
+    return { skipped: "model unavailable" };
+  }
 }
 
 /**
@@ -320,13 +404,14 @@ async function prepare() {
   const [posts, states, reader] = await Promise.all([
     all("post", POST_COLUMNS), all("user_post_state"), result(db.from("allowed_reader").select("user_id").single()),
   ]);
-  const { model, queue } = await loadTaste(posts, states);
+  const { vectors, clusters } = await loadUnderstanding();
+  const { model, queue } = await loadTaste(posts, states, clusters);
   const byId = new Map(posts.map((p) => [p.id, p]));
   const assigned = queue.map((q) => byId.get(q.post_id)).filter(Boolean);
   const read = new Set(states.filter((s) => s.read_at).map((s) => s.post_id));
   const unread = assigned.filter((p) => !read.has(p.id)).length;
   const target = setting("CONTENT_QUEUE_TARGET", 24, { min: 1, max: 500 });
-  const picks = rankQueue({ model, candidates: posts, assigned, need: Math.max(0, target - unread), now: model.now });
+  const picks = rankQueue({ model, candidates: posts, assigned, need: Math.max(0, target - unread), now: model.now, vectors });
   const added = picks.length ? await result(db.rpc("append_feed", { p_user_id: reader.user_id, p_ids: picks.map((p) => p.id) })) : 0;
   // Remember why each post was placed, so the feed can grade its own explorations and, from 202610020001,
   // explain itself and compare rankers. Without that migration only the slot is kept.
@@ -348,7 +433,7 @@ async function prepare() {
   const size = setting("CONTENT_RESERVE", 60, { min: 0, max: 200 });
   let reserve;
   try {
-    const next = size ? rankQueue({ model, candidates: posts, assigned: [...assigned, ...picks.map((p) => byId.get(p.id))], need: size, now: model.now }) : [];
+    const next = size ? rankQueue({ model, candidates: posts, assigned: [...assigned, ...picks.map((p) => byId.get(p.id))], need: size, now: model.now, vectors }) : [];
     await result(db.from("feed_reserve").delete().eq("user_id", reader.user_id));
     const rows = next.map((p, i) => ({ user_id: reader.user_id, post_id: p.id, rank: i + 1, slot: p.slot, ...(explained ? { reasons: p.reasons, ranker: RANKER } : {}) }));
     if (rows.length) {
@@ -364,7 +449,7 @@ async function prepare() {
     reserve = "apply supabase/migrations/202610010001_feed_reserve.sql so the feed can refill itself";
   }
   // unreadBefore at or above the target means the feed was full: new posts wait in the reserve until needed.
-  return { added, unreadBefore: unread, targetUnread: target, reserve, slots, exploreShare: model.exploreShare, feed: model.metrics, nichesFound: model.niches.length };
+  return { added, unreadBefore: unread, targetUnread: target, reserve, slots, exploreShare: model.exploreShare, feed: model.metrics, nichesFound: model.niches.length, withVectors: vectors.size };
 }
 
 async function withRun(stage, work) {
@@ -418,6 +503,9 @@ async function check() {
     await attempt("Migration 202610020001 (mixer foundations)",
       async () => { await result(db.rpc("candidate_summary")); await result(db.from("feed_reserve").select("reasons,ranker").limit(1)); await result(db.from("user_post_state").select("dwell_ms").limit(1)); },
       "apply supabase/migrations/202610020001_mixer_foundations.sql, before deploying the app that sends reading time");
+    await attempt("Migration 202610030001 (understanding)",
+      async () => { await result(db.from("post_vec").select("post_id").limit(1)); await result(db.from("idea_cluster").select("id").limit(1)); },
+      "apply supabase/migrations/202610030001_understanding.sql; until then posts are ranked without idea clusters");
     await attempt("Enrolled reader", async () => {
       const rows = await result(db.from("allowed_reader").select("user_id"));
       if (rows.length !== 1) throw new Error(`${rows.length} enrolled`);
@@ -631,6 +719,7 @@ async function main() {
     const metrics = await withRun(command, async () => {
       if (command === "classify") return classify(config);
       if (command === "bodies") return attachSavedArticles();
+      if (command === "understand") return understand();
       if (command === "draft") return draft(config);
       if (command === "publish-checked") return publishChecked();
       if (command === "prepare") return prepare();
@@ -638,7 +727,7 @@ async function main() {
       console.error("Drafting from your sources. Each post takes up to two AI calls; this can take a few minutes.");
       const drafted = await draft(config);
       const published = autoPublish() ? await publishChecked() : { skipped: "Set CONTENT_AUTO_PUBLISH=true to publish without review" };
-      return { drafted, published, queued: await prepare() };
+      return { drafted, published, understood: await understandIfOn(), queued: await prepare() };
     });
     console.log(JSON.stringify(metrics, null, 2));
   }

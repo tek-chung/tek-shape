@@ -1,4 +1,5 @@
 import { cleanSubtopic, placeOf, taxonomy } from "./taxonomy.mjs";
+import { UNDERSTANDING, cosine } from "./understand.mjs";
 
 /**
  * The reader's taste, learned from every signal, and the feed built from it.
@@ -111,8 +112,10 @@ const AREAS = taxonomy.umbrellas.filter((u) => u.id !== "other").map((u) => u.id
 /**
  * Learn the reader's taste from their posts, reading states and explicit steering (More / Less / Snooze).
  * `queue` is the feed in order ({ post_id, position, slot }), used for the feed's own report card.
+ * `clusters` (post id → idea cluster, from understand.mjs) adds a rung beside the subtopic: taste learnt on
+ * one idea carries to the same idea under another subtopic name.
  */
-export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.now() }) {
+export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.now(), clusters = new Map() }) {
   const stateById = new Map(states.map((s) => [s.post_id, s]));
   const postById = new Map(posts.map((p) => [p.id, p]));
   const nodes = new Map();
@@ -131,7 +134,10 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
     const place = placeOf(post.field);
     const sKey = subtopicKey(place.field, post.subtopic);
     if (!names.has(sKey)) names.set(sKey, cleanSubtopic(post.subtopic) || place.fieldLabel);
-    for (const key of [`u:${place.umbrella}`, `f:${place.field}`, `s:${sKey}`, `p:${publisherOfPost(post)}`]) {
+    const cluster = clusters.get(post.id);
+    const keys = [`u:${place.umbrella}`, `f:${place.field}`, `s:${sKey}`, `p:${publisherOfPost(post)}`];
+    if (cluster !== undefined && cluster !== null) keys.push(`k:${cluster}`);
+    for (const key of keys) {
       const n = node(key);
       n.w += w; n.wr += w * reward; n.count++;
       if (reward === REWARDS.uninteresting) { n.dislikes++; n.lastDislike = Math.max(n.lastDislike, at); }
@@ -184,13 +190,22 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
     pausedByField.set(field, entry);
   }
 
-  const estimate = (field, subtopic) => {
+  /**
+   * Expected enjoyment of a subtopic, borrowing from its field and area. With an idea cluster, the cluster's
+   * own record (itself shrunk towards the field) is blended in, the more so the less the subtopic has: a new
+   * subtopic name inside a well-read idea starts where that idea stands.
+   */
+  const estimate = (field, subtopic, cluster = null) => {
     const place = placeOf(field);
     const sKey = subtopicKey(place.field, subtopic);
     const umbrellaMean = meanOf(`u:${place.umbrella}`, prior);
     const fieldMean = meanOf(`f:${place.field}`, umbrellaMean);
-    const mean = meanOf(`s:${sKey}`, fieldMean);
-    const n = weightOf(`s:${sKey}`) + SETTINGS.strength;
+    const subtopicMean = meanOf(`s:${sKey}`, fieldMean);
+    const ws = weightOf(`s:${sKey}`) + SETTINGS.strength;
+    const wc = cluster === null || cluster === undefined ? 0 : weightOf(`k:${cluster}`);
+    const lambda = wc / (wc + ws);
+    const mean = lambda ? (1 - lambda) * subtopicMean + lambda * meanOf(`k:${cluster}`, fieldMean) : subtopicMean;
+    const n = ws + lambda * wc;
     return { place, sKey, umbrellaMean, fieldMean, mean, alpha: mean * n, beta: (1 - mean) * n, uncertainty: 1 / Math.sqrt(n) };
   };
 
@@ -280,7 +295,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
 
   return {
     now, prior, exploreShare, metrics, niches: niches.slice(0, 8),
-    estimate, pauseOf, fieldPause, prefFor, fatigue, multiplier, targetDifficulty, gap, comfort, weightOf, meanOf, names, nodes,
+    estimate, pauseOf, fieldPause, prefFor, fatigue, clusterOf: (id) => clusters.get(id) ?? null, multiplier, targetDifficulty, gap, comfort, weightOf, meanOf, names, nodes,
     bridge: (concepts) => conceptScore(concepts, liked),
     avoid: (concepts) => conceptScore(concepts, disliked),
     publisherMean: (publisher) => meanOf(`p:${sourceOf(publisher)}`, prior, SETTINGS.publisherStrength),
@@ -290,7 +305,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
 
 /** Expected enjoyment of one post, before any exploring: the number favourites are chosen by. */
 function expected(model, post, known) {
-  const e = model.estimate(post.field, post.subtopic);
+  const e = model.estimate(post.field, post.subtopic, model.clusterOf?.(post.id) ?? null);
   const choice = model.prefFor(e.place.field, e.sKey)?.choice;
   let value = e.mean + 0.3 * (model.publisherMean(publisherOfPost(post)) - model.prior);
   // An excerpt is the publisher's own summary, with no difficulty of its own to fit: neutral.
@@ -307,7 +322,7 @@ function expected(model, post, known) {
 }
 
 /** Names the ranker that placed a post, stored with each placement so rankers can be compared later. */
-export const RANKER = "taste-2";
+export const RANKER = "taste-3";
 const r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
 
 /**
@@ -341,14 +356,19 @@ function layout(batch, explores) {
  * Choose and order the next `need` posts. Returns [{ id, slot }] where slot is favourite, explore or stretch.
  * `assigned` is the feed so far (posts in queue order); `candidates` are published posts not yet in it.
  */
-export function rankQueue({ model, candidates, assigned, need, now = Date.now(), random = Math.random }) {
+export function rankQueue({ model, candidates, assigned, need, now = Date.now(), random = Math.random, vectors = new Map() }) {
   if (need <= 0) return [];
+  // Idea-level repeats (needs post vectors, from understand.mjs): a candidate that says what a post already in
+  // the feed said is dropped, unless it is harder, which makes it the next step rather than a repeat.
+  const recentVectors = assigned.slice(-500).flatMap((p) => (vectors.has(p.id) ? [{ post: p, vec: vectors.get(p.id) }] : []));
+  const twinOf = (post, vec, among) => among.find((other) => other.post.id !== post.id && cosine(vec, other.vec) >= UNDERSTANDING.duplicate
+    && (post.difficulty ?? 2) <= (other.post.difficulty ?? 2));
   const assignedIds = new Set(assigned.map((p) => p.id));
   const known = new Set(assigned.flatMap((p) => p.concept_ids ?? []));
   const seenSubtopics = new Set(assigned.map((p) => subtopicKey(placeOf(p.field).field, p.subtopic)));
   const describe = (p) => {
     const place = placeOf(p.field);
-    return { post: p, id: p.id, field: place.field, umbrella: place.umbrella, subKey: subtopicKey(place.field, p.subtopic), publisher: publisherOfPost(p), excerpt: p.kind === "excerpt" };
+    return { post: p, id: p.id, field: place.field, umbrella: place.umbrella, subKey: subtopicKey(place.field, p.subtopic), publisher: publisherOfPost(p), excerpt: p.kind === "excerpt", vec: vectors.get(p.id) ?? null };
   };
 
   const pool = [];
@@ -361,6 +381,7 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
     const concepts = post.concept_ids ?? [];
     // A true repeat: every idea already in the feed, in a subtopic already covered.
     if (concepts.length && concepts.every((c) => known.has(c)) && seenSubtopics.has(d.subKey)) continue;
+    if (d.vec && twinOf(post, d.vec, recentVectors)) continue;
     const x = expected(model, post, known);
     const theta = sampleBeta(x.e.alpha, x.e.beta, random);
     const weakArea = x.e.umbrellaMean < model.prior;
@@ -397,10 +418,14 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
   };
   const best = (rawScore, filter = () => true) => {
     const recent = history.slice(-SETTINGS.publisherDecay.window).map((h) => h.publisher);
+    const nearby = history.slice(-5).flatMap((h) => (h.vec ? [h.vec] : []));
     const { decay, floor } = SETTINGS.publisherDecay;
     const score = (c) => {
       const s = rawScore(c), k = recent.filter((p) => p === c.publisher).length;
-      const factor = floor + (1 - floor) * decay ** k;
+      // Close to something just placed, but not the same idea: scored down, so the batch keeps its variety.
+      const closest = c.vec ? Math.max(0, ...nearby.map((v) => cosine(c.vec, v))) : 0;
+      const nearness = Math.min(1, Math.max(0, (closest - UNDERSTANDING.near) / (UNDERSTANDING.duplicate - UNDERSTANDING.near)));
+      const factor = (floor + (1 - floor) * decay ** k) * (1 - 0.5 * nearness);
       return s >= 0 ? s * factor : s / factor;
     };
     for (let level = 0; level <= 4; level++) {
@@ -442,6 +467,10 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
       else if (!pick) pick = best((c) => c.fav);
       if (!pick) break;
       pool.splice(pool.indexOf(pick), 1);
+      // The same idea in other words, waiting in the pool, is not placed after it.
+      if (pick.vec) for (let i = pool.length - 1; i >= 0; i--) {
+        if (pool[i].vec && twinOf(pool[i].post, pool[i].vec, [{ post: pick.post, vec: pick.vec }])) pool.splice(i, 1);
+      }
       history.push(pick); recentUmbrellas.add(pick.umbrella);
       for (const c of pick.post.concept_ids ?? []) known.add(c);
       picks.push({ id: pick.id, slot, reasons: reasonsFor(pick, slot, why) });

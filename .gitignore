@@ -62,3 +62,6 @@ next-env.d.ts
 *.sqlite
 *.sqlite3
 *.db
+
+# Local AI model files for the understanding layer (downloaded on first use).
+/.cache/

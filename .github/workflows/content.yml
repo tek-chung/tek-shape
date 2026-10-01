@@ -73,6 +73,13 @@ jobs:
         # No install scripts: the content engine needs none, and skipping them keeps a job that holds
         # secrets away from third-party postinstall code.
         run: npm ci --no-audit --no-fund --ignore-scripts
+      - name: Cache the understanding model
+        if: steps.ready.outputs.ok == 'true'
+        # The local embedding model (~120 MB) is downloaded once, then reused across runs.
+        uses: actions/cache@v4
+        with:
+          path: .cache/transformers
+          key: transformers-paraphrase-multilingual-MiniLM-L12-v2-q8
       - name: Run one cycle
         if: steps.ready.outputs.ok == 'true'
         run: npm run content -- cycle
