@@ -16,6 +16,15 @@ import { cleanSubtopic, placeOf, taxonomy } from "./taxonomy.mjs";
 
 export const REWARDS = { uninteresting: 0, skipped: 0.25, read: 0.55, deeper: 0.75, more: 0.8, harder: 0.85, opened: 0.9, saved: 1 };
 
+/**
+ * Reading time refines the two weakest signals (needs `dwell_ms`, migration 202610020001; without it, or for
+ * posts read before it was measured, the plain values above apply). A read earns 0.5 for a quick look up to
+ * 0.65 for the time a careful read takes; scrolled past after less than 1.5 s in view is 0.15, a longer look
+ * that never became a read 0.3. Anything at or above READ_MIN counts as read for the report card.
+ */
+export const DWELL = { readMin: 0.5, readFull: 0.65, passedOver: 0.15, glanced: 0.3, glanceMs: 1500, postMs: 45_000, excerptMs: 20_000 };
+export const READ_MIN = DWELL.readMin;
+
 export const SETTINGS = {
   prior: 0.55,              // expected enjoyment of an unknown post
   strength: 3,              // pseudo-posts each rung borrows from the rung above
@@ -25,6 +34,12 @@ export const SETTINGS = {
   batch: 10,
   explore: { min: 0.15, max: 0.3, start: 0.25, minSamples: 5 },
   snooze: { dislikes: 2, days: 30, subtopicsForField: 3 },
+  // After a Not interesting, the subtopic's posts score at 0.2× and recover linearly over six weeks, unless
+  // something there is enjoyed again (X's feedback fatigue: 0.2× recovering over 140 days for an author).
+  fatigue: { floor: 0.2, days: 42 },
+  // Each earlier post from the same publisher among the last ten placed multiplies a candidate's score by a
+  // decaying factor, down to a floor (X's author diversity: 0.25 + 0.75 × 0.5^k).
+  publisherDecay: { decay: 0.5, floor: 0.25, window: 10 },
   breadthWindow: 20,        // every area with posts available appears at least once in this many
   niche: { minMean: 0.7, lift: 0.12, minWeight: 0.8 },
   metricsWindow: 60,
@@ -42,19 +57,24 @@ export const sourceOf = (publisher) => {
 const publisherOfPost = (post) => sourceOf(post.sources?.[0]?.publisher ?? post.publisher);
 
 /** One enjoyment score in [0, 1], or null when there is no evidence yet. "Not interesting" always wins. */
-export function rewardOf(state, now = Date.now()) {
+export function rewardOf(state, now = Date.now(), post = null) {
   if (!state) return null;
   if (state.rating === "uninteresting") return REWARDS.uninteresting;
+  const dwell = Number(state.dwell_ms) > 0 ? Number(state.dwell_ms) : 0;
+  // How long a careful read of this post takes: a full post's explanation and insight, or an excerpt's paragraph.
+  const fullRead = post?.kind === "excerpt" ? DWELL.excerptMs : DWELL.postMs;
+  const read = dwell ? DWELL.readMin + (DWELL.readFull - DWELL.readMin) * Math.min(1, dwell / fullRead) : REWARDS.read;
   const positives = [
     state.bookmarked === true && REWARDS.saved,
     state.opened_at && REWARDS.opened,
     state.rating === "harder" && REWARDS.harder,
     state.rating === "more" && REWARDS.more,
     state.deeper_opened_at && REWARDS.deeper,
-    state.read_at && REWARDS.read,
+    state.read_at && read,
   ].filter((value) => typeof value === "number");
   if (positives.length) return Math.max(...positives);
-  if (state.first_seen_at && now - Date.parse(state.first_seen_at) > SETTINGS.skipAfterHours * 3_600_000) return REWARDS.skipped;
+  if (state.first_seen_at && now - Date.parse(state.first_seen_at) > SETTINGS.skipAfterHours * 3_600_000)
+    return !dwell ? REWARDS.skipped : dwell < DWELL.glanceMs ? DWELL.passedOver : DWELL.glanced;
   return null;
 }
 
@@ -96,7 +116,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
   const stateById = new Map(states.map((s) => [s.post_id, s]));
   const postById = new Map(posts.map((p) => [p.id, p]));
   const nodes = new Map();
-  const node = (key) => { let n = nodes.get(key); if (!n) nodes.set(key, n = { w: 0, wr: 0, count: 0, dislikes: 0, positives: 0, lastDislike: 0 }); return n; };
+  const node = (key) => { let n = nodes.get(key); if (!n) nodes.set(key, n = { w: 0, wr: 0, count: 0, dislikes: 0, positives: 0, lastDislike: 0, lastPositive: 0 }); return n; };
   const names = new Map();       // subtopic key → display name
   const liked = new Map(), disliked = new Map();
   const difficulty = new Map();  // field → { w, wd, shift }
@@ -104,7 +124,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
 
   for (const post of posts) {
     const state = stateById.get(post.id);
-    const reward = rewardOf(state, now);
+    const reward = rewardOf(state, now, post);
     if (reward === null) continue;
     const at = Date.parse(state.updated_at ?? state.read_at ?? state.first_seen_at ?? "") || now;
     const w = 0.5 ** (Math.max(0, now - at) / (SETTINGS.halfLifeDays * DAY));
@@ -115,7 +135,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
       const n = node(key);
       n.w += w; n.wr += w * reward; n.count++;
       if (reward === REWARDS.uninteresting) { n.dislikes++; n.lastDislike = Math.max(n.lastDislike, at); }
-      if (reward >= REWARDS.deeper) n.positives++;
+      if (reward >= REWARDS.deeper) { n.positives++; n.lastPositive = Math.max(n.lastPositive, at); }
     }
     totalW += w; totalWR += w * reward;
     for (const concept of post.concept_ids ?? []) {
@@ -123,7 +143,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
       if (reward <= REWARDS.skipped) disliked.set(concept, (disliked.get(concept) ?? 0) + w);
     }
     const d = difficulty.get(place.field) ?? { w: 0, wd: 0, shift: 0 };
-    if (reward >= REWARDS.read) { d.w += w; d.wd += w * (post.difficulty ?? 2); }
+    if (reward >= READ_MIN) { d.w += w; d.wd += w * (post.difficulty ?? 2); }
     if (state.rating === "harder") d.shift += 0.4 * w;
     if (reward <= REWARDS.skipped && (post.difficulty ?? 2) >= 4) d.shift -= 0.3 * w;
     difficulty.set(place.field, d);
@@ -195,6 +215,15 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
     return fieldPause(field);
   };
 
+  /** 1 normally; after a recent Not interesting in this subtopic, less, recovering to 1 over the fatigue window. */
+  const fatigue = (field, sKey) => {
+    const n = nodes.get(`s:${sKey}`);
+    if (!n?.lastDislike || n.lastPositive > n.lastDislike) return 1;
+    if (pref.get(`subtopic:${sKey}`)?.choice === "more" || pref.get(`field:${field}`)?.choice === "more") return 1;
+    const age = Math.max(0, now - n.lastDislike) / (SETTINGS.fatigue.days * DAY);
+    return age >= 1 ? 1 : SETTINGS.fatigue.floor + (1 - SETTINGS.fatigue.floor) * age;
+  };
+
   const targetDifficulty = (field) => {
     const d = difficulty.get(field);
     const base = d?.w ? d.wd / d.w : 2.5;
@@ -219,7 +248,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
 
   // The feed's report card, over the most recent posts it placed that now have an outcome.
   const resolved = queue
-    .map((q) => ({ q, reward: rewardOf(stateById.get(q.post_id), now) }))
+    .map((q) => ({ q, reward: rewardOf(stateById.get(q.post_id), now, postById.get(q.post_id)) }))
     .filter((r) => r.reward !== null && postById.has(r.q.post_id))
     .sort((a, b) => (b.q.position ?? 0) - (a.q.position ?? 0))
     .slice(0, SETTINGS.metricsWindow);
@@ -227,10 +256,10 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
   const explorations = resolved.filter((r) => r.q.slot === "explore" || r.q.slot === "stretch");
   const metrics = {
     placed: resolved.length,
-    hitRate: share(resolved, (r) => r.reward >= REWARDS.read),
+    hitRate: share(resolved, (r) => r.reward >= READ_MIN),
     delightRate: share(resolved, (r) => r.reward >= REWARDS.more),
     explorations: explorations.length,
-    explorationHitRate: share(explorations, (r) => r.reward >= REWARDS.read),
+    explorationHitRate: share(explorations, (r) => r.reward >= READ_MIN),
   };
   // Exploration earns its share: as good as favourites → 30%; never landing → 15%. Never zero.
   const exploreShare = metrics.explorations < SETTINGS.explore.minSamples || metrics.hitRate === null
@@ -251,7 +280,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
 
   return {
     now, prior, exploreShare, metrics, niches: niches.slice(0, 8),
-    estimate, pauseOf, fieldPause, prefFor, multiplier, targetDifficulty, gap, comfort, weightOf, meanOf, names, nodes,
+    estimate, pauseOf, fieldPause, prefFor, fatigue, multiplier, targetDifficulty, gap, comfort, weightOf, meanOf, names, nodes,
     bridge: (concepts) => conceptScore(concepts, liked),
     avoid: (concepts) => conceptScore(concepts, disliked),
     publisherMean: (publisher) => meanOf(`p:${sourceOf(publisher)}`, prior, SETTINGS.publisherStrength),
@@ -266,7 +295,7 @@ function expected(model, post, known) {
   let value = e.mean + 0.3 * (model.publisherMean(publisherOfPost(post)) - model.prior);
   // An excerpt is the publisher's own summary, with no difficulty of its own to fit: neutral.
   const fit = post.kind === "excerpt" ? 1 : Math.exp(-(((post.difficulty ?? 2) - model.targetDifficulty(e.place.field)) ** 2) / 2);
-  value *= (0.85 + 0.15 * fit) * model.multiplier(choice);
+  value *= (0.85 + 0.15 * fit) * model.multiplier(choice) * model.fatigue(e.place.field, e.sKey);
   const concepts = post.concept_ids ?? [];
   const novelty = concepts.length ? concepts.filter((c) => !known.has(c)).length / concepts.length : 1;
   value *= 0.8 + 0.2 * novelty;
@@ -278,7 +307,7 @@ function expected(model, post, known) {
 }
 
 /** Names the ranker that placed a post, stored with each placement so rankers can be compared later. */
-export const RANKER = "taste-1";
+export const RANKER = "taste-2";
 const r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
 
 /**
@@ -292,6 +321,7 @@ function reasonsFor(pick, slot, why) {
     value: r2(pick.fav), explore: r2(pick.explore), mean: r2(pick.mean), novelty: r2(pick.novelty), fit: r2(pick.fit),
     difficulty: pick.post.difficulty ?? null, target: r2(pick.target), gap: r2(pick.gap), bridge: r2(pick.bridge),
     ...(pick.choice ? { steer: pick.choice } : {}),
+    ...(pick.fatigue < 1 ? { fatigue: r2(pick.fatigue) } : {}),
   };
 }
 const exploreReason = (pick) => (pick.gap >= 0.5 ? "thin-area" : pick.bridge >= 0.25 ? "bridge" : "uncertain");
@@ -345,8 +375,9 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
     d.choice = x.choice;
     d.gap = model.gap(d.umbrella);
     d.bridge = model.bridge(concepts);
+    d.fatigue = model.fatigue(d.field, d.subKey);
     d.explore = (theta + 0.35 * model.gap(d.umbrella) + 0.2 * weakness + (weakArea ? 0.3 : 0.15) * model.bridge(concepts)
-      - 0.3 * model.avoid(concepts) + 0.1 * x.e.uncertainty) * (1 - 0.5 * comfort) * model.multiplier(x.choice);
+      - 0.3 * model.avoid(concepts) + 0.1 * x.e.uncertainty) * (1 - 0.5 * comfort) * model.multiplier(x.choice) * model.fatigue(d.field, d.subKey);
     const target = model.targetDifficulty(d.field);
     d.target = target;
     d.harderStretch = (post.difficulty ?? 2) >= target + 0.5 && target > 2.5;
@@ -364,10 +395,21 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
     if (level < 1 && prev && prev.publisher === c.publisher) return false;
     return true;
   };
-  const best = (score, filter = () => true) => {
+  const best = (rawScore, filter = () => true) => {
+    const recent = history.slice(-SETTINGS.publisherDecay.window).map((h) => h.publisher);
+    const { decay, floor } = SETTINGS.publisherDecay;
+    const score = (c) => {
+      const s = rawScore(c), k = recent.filter((p) => p === c.publisher).length;
+      const factor = floor + (1 - floor) * decay ** k;
+      return s >= 0 ? s * factor : s / factor;
+    };
     for (let level = 0; level <= 4; level++) {
-      let top = null;
-      for (const c of pool) if (filter(c) && allowed(c, level) && (!top || score(c) > score(top))) top = c;
+      let top = null, topScore = -Infinity;
+      for (const c of pool) {
+        if (!filter(c) || !allowed(c, level)) continue;
+        const value = score(c);
+        if (!top || value > topScore) { top = c; topScore = value; }
+      }
       if (top) return top;
     }
     return null;
@@ -433,7 +475,7 @@ export function judgeTopic(model, { field, subtopic, publisher }, random = Math.
   const choice = model.prefFor(e.place.field, e.sKey)?.choice;
   const theta = sampleBeta(e.alpha, e.beta, random);
   const score = (0.6 * e.mean + 0.4 * theta + 0.2 * model.gap(e.place.umbrella)
-    + 0.2 * (model.publisherMean(publisher) - model.prior)) * model.multiplier(choice);
+    + 0.2 * (model.publisherMean(publisher) - model.prior)) * model.multiplier(choice) * model.fatigue(e.place.field, e.sKey);
   return { skip: false, score, field: e.place.field };
 }
 

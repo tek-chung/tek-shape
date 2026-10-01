@@ -236,3 +236,48 @@ test("a batch always makes room for the best waiting excerpt, which would otherw
     assert.equal(placed({ ...excerpt, kind: undefined }, 10, seed), false, `seed ${seed}: the same post, not an excerpt, loses to full posts`);
   }
 });
+
+test("reading time refines a read and a scroll-past; without it the plain values stand", async () => {
+  const { DWELL, READ_MIN } = await import("../../scripts/content/taste.mjs");
+  const read = (dwell_ms, extra = {}) => rewardOf(state({ id: "x" }, { read_at: ago(1), dwell_ms, ...extra }), now);
+  assert.equal(read(0), REWARDS.read, "measured before dwell existed");
+  assert.equal(read(2000).toFixed(3), (DWELL.readMin + 0.15 * 2000 / DWELL.postMs).toFixed(3));
+  assert.equal(read(DWELL.postMs * 3), DWELL.readFull, "a long read is capped");
+  assert.ok(read(1000) >= READ_MIN && read(1000) < REWARDS.deeper, "still a read, still below the deeper explanation");
+  assert.equal(rewardOf(state({ id: "x" }, { read_at: ago(1), dwell_ms: DWELL.excerptMs }), now, { kind: "excerpt" }), DWELL.readFull, "an excerpt is shorter to read");
+  assert.equal(read(500, { rating: "harder" }), REWARDS.harder, "an explicit rating still wins");
+  const past = (dwell_ms) => rewardOf(state({ id: "x" }, { first_seen_at: ago(2), dwell_ms }), now);
+  assert.equal(past(0), REWARDS.skipped);
+  assert.equal(past(600), DWELL.passedOver);
+  assert.equal(past(4000), DWELL.glanced);
+});
+
+test("one Not interesting dims a subtopic, which recovers over six weeks unless enjoyed again", () => {
+  const p = post("ethics", "Trolley Problems");
+  const key = subtopicKey("ethics", "Trolley Problems");
+  const at = (days) => buildTaste({ posts: [p], states: [state(p, { read_at: ago(days), rating: "uninteresting", updated_at: ago(days) })], now });
+  assert.ok(Math.abs(at(0).fatigue("ethics", key) - 0.2) < 0.01, "just disliked");
+  assert.ok(Math.abs(at(21).fatigue("ethics", key) - 0.6) < 0.01, "half recovered after three weeks");
+  assert.equal(at(50).fatigue("ethics", key), 1);
+  assert.equal(at(0).fatigue("ethics", subtopicKey("ethics", "Virtue")), 1, "other subtopics are untouched");
+  assert.equal(at(0).pauseOf("ethics", key), null, "one dislike dims; it does not pause");
+  const q = post("ethics", "Trolley problems");
+  const forgiven = buildTaste({ posts: [p, q], states: [state(p, { rating: "uninteresting", updated_at: ago(5) }), state(q, { read_at: ago(1), rating: "more", updated_at: ago(1) })], now });
+  assert.equal(forgiven.fatigue("ethics", key), 1, "a later More lifts it");
+  const steered = buildTaste({ posts: [p], states: [state(p, { rating: "uninteresting", updated_at: ago(1) })], prefs: [{ scope: "field", key: "ethics", choice: "more" }], now });
+  assert.equal(steered.fatigue("ethics", key), 1, "your own More overrides it");
+});
+
+test("a publisher that already filled recent places gives way to others of similar merit", () => {
+  const fields = ["algebra-number-theory", "quantum-physics", "ethics", "artificial-intelligence", "modern-history", "neuroscience"];
+  const history = fields.flatMap((f) => [0, 1].map((i) => post(f, `${f} ${i}`, { sources: [{ publisher: "Aeon" }] })));
+  const model = buildTaste({ posts: history, states: history.map(liked), now });
+  const candidates = fields.flatMap((f) => [
+    post(f, `${f} more`, { sources: [{ publisher: "Aeon" }] }),
+    post(f, `${f} other`, { sources: [{ publisher: f.length % 2 ? "Quanta Magazine" : "Nature" }] }),
+  ]);
+  const picks = rankQueue({ model, candidates, assigned: history, need: 6, now, random: seededRandom(2) });
+  const byId = new Map(candidates.map((c) => [c.id, c.sources[0].publisher]));
+  const aeon = picks.filter((p) => byId.get(p.id) === "Aeon").length;
+  assert.ok(aeon <= 2, `after ten Aeon posts in a row, Aeon takes at most two of six (${aeon})`);
+});

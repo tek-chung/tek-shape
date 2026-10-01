@@ -439,6 +439,24 @@ mixer, demand-led drafting, Your T / Dear T steering) starts with three foundati
   dwell merging. SQL 65, content 112, client 7 pass in the Claude sandbox. **Not run:** lint, build,
   Playwright, anything against the live project.
 
+Phase 0 committed as f8fbe49 after the owner applied the migration and ran lint and build.
+
+## 5r. T-Mixer phase 2a: ranker taste-2 (2 Oct 2026, Claude)
+
+No migration; pure changes in `taste.mjs`, ranker label `taste-2` on new placements.
+
+- **Reading time in rewards** (`DWELL`, `READ_MIN`): read 0.5–0.65 by time in view against 45 s (post) or 20 s
+  (excerpt); unread after 24 h is 0.15 under 1.5 s in view, 0.3 above. No dwell recorded → old values.
+  Report-card and difficulty thresholds use `READ_MIN` (0.5) so quick reads still count as reads.
+- **Feedback fatigue** (`SETTINGS.fatigue`, `model.fatigue`): one Not interesting multiplies that subtopic's
+  favourite, explore and triage scores by 0.2, recovering linearly over 42 days; a later deeper-or-better post
+  there, or a More steer on it or its field, lifts it at once. The two-dislike pause is unchanged.
+- **Publisher decay** (`SETTINGS.publisherDecay`, inside `rankQueue`'s `best`): 0.25 + 0.75 × 0.5^k for k earlier
+  posts from the same publisher in the last ten placed (Hacker News links count as Hacker News).
+- Reasons gain `fatigue` when it applied. Tests: content 115 (dwell rewards, fatigue, publisher decay — the
+  last checked to fail with decay switched off). The excerpt slot was kept: per-format normalisation would
+  either always open batches with the lone excerpt or never place it.
+
 Next T-Mixer phases (agreed plan, not started): 1 understanding (embeddings, idea clusters, concept graph;
 needs a choice between a local transformers.js model and Gemini's embedding API), 2 multi-head value model
 using dwell, fatigue curve, format normalisation (retires the excerpt slot), 3 mixer with seven sources,

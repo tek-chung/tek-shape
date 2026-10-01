@@ -136,16 +136,21 @@ All in `scripts/content/taste.mjs` (pure functions; tests in `tests/content/tast
 
 1. **One enjoyment score per post**: Not interesting 0 · scrolled past (seen, unread after 24 h) 0.25 · read 0.55 ·
    deeper explanation 0.75 · More 0.8 · Harder 0.85 · opened the original 0.9 · saved 1. Not interesting wins;
-   otherwise the highest applies.
+   otherwise the highest applies. Where reading time is recorded (`dwell_ms`), a read earns 0.5 for a quick look
+   up to 0.65 for a careful one (45 s for a post, 20 s for an excerpt), and an unread post counts 0.15 if it was
+   in view under 1.5 s, 0.3 if longer.
 2. **Layered estimates** per area → field → subtopic, and per source. Each layer borrows 3 pseudo-posts from the
    one above, so new subtopics inherit their field's standing. Evidence halves in weight every 60 days.
 3. **Pauses**: a subtopic with 2 Not interesting and nothing positive rests 30 days after the latest dislike; a
-   field only when 3 of its subtopics rest; an area never. Map steering (More / Less / Snooze) overrides.
+   field only when 3 of its subtopics rest; an area never. Map steering (More / Less / Snooze) overrides. A
+   single Not interesting dims its subtopic instead: 0.2× at once, recovering evenly over 42 days, or at once
+   if something there is enjoyed again (after X's feedback fatigue).
 4. **Feed batches of 10** (`rankQueue`): favourites by expected enjoyment (difficulty fit, novelty, news age,
    source); explorations by Thompson sampling, weighted to thin or weak areas, approached through concepts the
    reader already likes, discounted in comfort-zone areas; one stretch post (an area missing from the last 20,
    else a harder post where Harder was asked). Exploration share self-tunes between 15% and 30%.
-   Variety: no two in a row from one field, at most 2 of 5 from one area, one per subtopic per batch.
+   Variety: no two in a row from one field, at most 2 of 5 from one area, one per subtopic per batch, and each
+   earlier post from the same publisher in the last ten placed multiplies a candidate by 0.25 + 0.75 × 0.5^k.
 5. **Upstream**: `planSources` orders sources (overdue first, then sampled enjoyment plus map-gap coverage; the
    top third get two turns). One **triage** call per run files the next headlines; resting subtopics are
    skipped before any drafting call, and each source's most promising article is drafted first with its
