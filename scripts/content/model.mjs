@@ -14,7 +14,9 @@ export const draftSchema = object({
   // instead. The small triage and classify schemas below carry the enum without trouble.
   field:string, subtopic:string, title:string, explanation:array(string), insight:string, deeper:string,
   contentType:{ type:"string", enum:["news","evergreen"] }, difficulty:{ type:"integer" },
-  conceptIds:array(string), eventDate:nullable, articleDate:nullable,
+  conceptIds:array(string),
+  // Concepts the article takes for granted (its prerequisites), for depth ladders. Plain strings, no enum.
+  assumes:array(string), eventDate:nullable, articleDate:nullable,
   sources:array(object({ url:string, publisher:string, title:string, articleDate:nullable, accessedAt:string })),
   // Claims cite sentences by number; the engine fills in the verbatim text. Models are far better at
   // pointing than at copying, and the evidence is then exact by construction.

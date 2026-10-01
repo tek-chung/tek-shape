@@ -99,7 +99,7 @@ test("every placement says why, in a small record fit to store and never to log"
   const model = buildTaste({ posts: history, states: history.map((p) => liked(p)), now });
   const candidates = [...fields, "earth-sciences", "law-rights"].flatMap((f) => [1, 2, 3].map((i) => post(f, `${f} new ${i}`)));
   const picks = rankQueue({ model, candidates, assigned: history, need: 10, now, random: seededRandom(5) });
-  const codes = new Set(["favourite", "excerpt", "thin-area", "bridge", "uncertain", "breadth", "harder"]);
+  const codes = new Set(["favourite", "excerpt", "thin-area", "bridge", "uncertain", "breadth", "harder", "next-step"]);
   for (const pick of picks) {
     assert.equal(pick.reasons.v, 1);
     assert.equal(pick.reasons.slot, pick.slot);
@@ -317,4 +317,31 @@ test("the same idea in other words is not placed twice, unless it goes deeper", 
   assert.equal([twinA.id, twinB.id].filter((id) => picks.includes(id)).length, 1, "of two waiting twins, one is placed");
   const without = rankQueue({ model, candidates, assigned: history, need: 10, now, random: seededRandom(3) }).map((p) => p.id);
   assert.ok(without.includes(echo.id), "without vectors the old rules apply");
+});
+
+test("depth ladders: Harder makes an idea familiar, so it is not retaught, and posts built on it come next", () => {
+  const basic = post("probability-statistics", "Bayes Theorem", { concept_ids: ["bayes-theorem"], difficulty: 2 });
+  const aliases = new Map([["bayes-rule", "bayes-theorem"]]);
+  const model = buildTaste({ posts: [basic], states: [state(basic, { read_at: ago(1), rating: "harder" })], now, aliases });
+  assert.ok(model.familiarity("bayes-theorem") > 0.95, "Harder yesterday: familiar (evidence fades slowly)");
+  assert.equal(model.familiarity("bayes-rule"), model.familiarity("bayes-theorem"), "the same idea under another tag");
+  assert.equal(model.familiarity("priors"), 0);
+  const read = buildTaste({ posts: [basic], states: [state(basic, { read_at: ago(1) })], now });
+  assert.ok(read.familiarity("bayes-theorem") > 0.3 && read.familiarity("bayes-theorem") < 0.4, "one read is a third of the way");
+  const nope = buildTaste({ posts: [basic], states: [state(basic, { rating: "uninteresting" })], now });
+  assert.equal(nope.familiarity("bayes-theorem"), 0, "Not interesting never marks an idea as known");
+
+  const again = post("probability-statistics", "Bayes Rule Basics", { concept_ids: ["bayes-rule"], difficulty: 2 });
+  const next = post("probability-statistics", "Hierarchical Models", { concept_ids: ["hierarchical-models"], assumes: ["bayes-rule"], difficulty: 3 });
+  const plain = post("probability-statistics", "Survey Weights", { concept_ids: ["survey-weights"], difficulty: 3 });
+  assert.ok(model.readiness(next) > 0.95);
+  assert.equal(model.readiness(plain), null, "assumes nothing");
+  const picks = rankQueue({ model, candidates: [again, next, plain], assigned: [basic], need: 3, now, random: seededRandom(1) });
+  const why = Object.fromEntries(picks.map((p) => [p.id, p.reasons]));
+  assert.ok(why[next.id]?.ladder > 0.95, "the post built on Bayes is marked as the next step");
+  const order = picks.map((p) => p.id);
+  assert.ok(order.indexOf(next.id) < order.indexOf(plain.id), "and ranks above an otherwise similar post");
+  if (order.includes(again.id)) assert.ok(order.indexOf(again.id) > order.indexOf(next.id), "the restatement comes last, if at all");
+  if (order.includes(again.id)) assert.equal(why[again.id].reteach, true, "and is marked as reteaching");
+  assert.equal(why[plain.id].reteach, undefined);
 });

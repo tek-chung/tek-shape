@@ -483,3 +483,12 @@ test("rate-limiting everywhere stops the run instead of hammering the remaining 
 test("a bug is not mistaken for a provider failure", async () => {
   await assert.rejects(draftCandidates({ groups:[group], retrieve:async()=>response, generate:async()=>{ throw new TypeError("bug"); }, save:async()=>{} }), /bug/);
 });
+
+test("prerequisites are folded to slugs, never the post's own concepts, at most five, and never hold a post", () => {
+  const settled = settleDraft({ ...structuredClone(draft), assumes: ["Thermodynamics", "Energy Transfer", ...draft.conceptIds, "a", "b-c", "d-e", "f-g", "h-i"] }, source);
+  assert.ok(settled.assumes.length <= 5);
+  assert.ok(settled.assumes.includes("thermodynamics"));
+  assert.ok(!settled.assumes.some((a) => settled.conceptIds.includes(a)));
+  assert.deepEqual(settleDraft({ ...structuredClone(draft), assumes: undefined }, source).assumes, [], "missing means none");
+  assert.deepEqual(checkDraft(settleDraft(structuredClone(draft), source), [source]), [], "an older-style draft still passes");
+});

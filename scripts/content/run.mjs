@@ -6,7 +6,7 @@ import { extractArticle, fetchSource, pageExcerpt } from "./sources.mjs";
 import { ModelChainError, classifySchema, draftSchema, generateJSON, liveModels, modelConfig, triageSchema } from "./model.mjs";
 import { RANKER, buildTaste, seededRandom, judgeTopic, planSources, promptSummary, rankQueue, snapshotOf, sourceOf } from "./taste.mjs";
 import { cleanSubtopic, placeOf } from "./taxonomy.mjs";
-import { DIMS, EMBED_MODEL, clusterCount, clustersDue, embedder, kmeans, labelCluster, nearestCentroid, neighbourSpread, pack, postText, unpack } from "./understand.mjs";
+import { DIMS, EMBED_MODEL, clusterCount, conceptText, foldConcepts, clustersDue, embedder, kmeans, labelCluster, nearestCentroid, neighbourSpread, pack, postText, unpack } from "./understand.mjs";
 import { checkDraft, checkExcerpt, checkReview, excerptFound, recentConcepts } from "./editorial.mjs";
 
 nextEnv.loadEnvConfig(process.cwd());
@@ -56,7 +56,7 @@ const missingMigration = (error) => /could not find the function|schema cache|do
 async function all(table, columns = "*", limit = 200_000) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
-    const order = { feed_queue: "position", user_post_state: "post_id", topic_preference: "key", post_vec: "post_id" }[table] ?? "id";
+    const order = { feed_queue: "position", user_post_state: "post_id", topic_preference: "key", post_vec: "post_id", concept_alias: "alias" }[table] ?? "id";
     const page = await result(db.from(table).select(columns).order(order).range(from, from + 999));
     rows.push(...page);
     if (page.length < 1000) return rows;
@@ -82,9 +82,45 @@ async function loadSources() {
 }
 
 /** The reader's taste, from everything they have done and every steer they have given. */
-async function loadTaste(posts, states, clusters = new Map()) {
+async function loadTaste(posts, states, clusters = new Map(), aliases = new Map()) {
   const [prefs, queue] = await Promise.all([all("topic_preference"), all("feed_queue")]);
-  return { model: buildTaste({ posts, states, prefs, queue, now: Date.now(), clusters }), queue };
+  return { model: buildTaste({ posts, states, prefs, queue, now: Date.now(), clusters, aliases }), queue };
+}
+
+/**
+ * A published post's prerequisites (`assumes`), written beside publish_candidate rather than through it, so
+ * that function is left as it is. Before migration 202610040001 there is nowhere to keep them: skipped.
+ */
+let assumesColumn = true;
+async function recordAssumes(postId, payload) {
+  const assumes = Array.isArray(payload?.assumes) ? payload.assumes.filter((a) => typeof a === "string").slice(0, 8) : [];
+  if (!assumes.length || !assumesColumn) return;
+  try {
+    await result(db.from("post").update({ assumes }).eq("id", postId));
+  } catch (error) {
+    if (!missingMigration(error)) throw error;
+    assumesColumn = false;
+  }
+}
+
+/** Posts as the ranker reads them, with prerequisites where the database has them (202610040001). */
+async function rankingPosts() {
+  try {
+    return await all("post", `${POST_COLUMNS},assumes`);
+  } catch (error) {
+    if (!missingMigration(error)) throw error;
+    return all("post", POST_COLUMNS);
+  }
+}
+
+/** Concept tag → canonical concept, or an empty map before 202610040001 or the first `understand`. */
+async function loadAliases() {
+  try {
+    return new Map((await all("concept_alias", "alias,concept_id")).map((r) => [r.alias, r.concept_id]));
+  } catch (error) {
+    if (!missingMigration(error)) throw error;
+    return new Map();
+  }
 }
 
 /** Post vectors and idea clusters from the current model, or nothing before migration 202610030001. */
@@ -116,8 +152,10 @@ async function understand() {
     .filter((p) => ["published", "sample"].includes(p.status) && p.kind !== "excerpt" && !have.has(p.id)).map((p) => p.id);
   metrics.pending = pending.length;
   const todo = pending.slice(0, limit);
+  let model = null;
+  const getEmbed = async () => (model ??= await embedder());
   if (todo.length) {
-    const embed = await embedder();
+    const embed = await getEmbed();
     for (let i = 0; i < todo.length; i += 50) {
       const rows = await result(db.from("post").select("id,title,insight,explanation").in("id", todo.slice(i, i + 50)));
       const vecs = await embed(rows.map(postText));
@@ -153,7 +191,38 @@ async function understand() {
     metrics.clusters = clusters.length;
   }
   metrics.spread = neighbourSpread(stored.map((r) => r.v));
+  metrics.concepts = await understandConcepts(getEmbed);
   return metrics;
+}
+
+/**
+ * Fold every concept tag in use (taught or assumed) into canonical concepts, embedding only tags not seen
+ * before. Counts only in the output: tags are the reader's subjects, so never printed in CI.
+ */
+async function understandConcepts(getEmbed) {
+  try {
+    const [posts, known, stored] = await Promise.all([
+      all("post", "id,concept_ids,assumes"), all("concept_alias", "alias"), all("concept", "id,model,vec"),
+    ]);
+    const counts = new Map();
+    for (const post of posts) for (const tag of [...(post.concept_ids ?? []), ...(post.assumes ?? [])]) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    const seen = new Set(known.map((r) => r.alias));
+    const limit = setting("CONTENT_CONCEPT_LIMIT", 3000, { min: 0, max: 20000 });
+    const fresh = [...counts.keys()].filter((tag) => !seen.has(tag)).sort((a, b) => counts.get(b) - counts.get(a)).slice(0, limit);
+    if (!fresh.length) return { tags: counts.size, new: 0, merged: 0 };
+    const vecs = await (await getEmbed())(fresh.map(conceptText));
+    const existing = stored.filter((c) => c.model === EMBED_MODEL).map((c) => ({ id: c.id, vec: unpack(c.vec) })).filter((c) => c.vec);
+    const { concepts, aliases } = foldConcepts(existing, fresh.map((slug, i) => ({ slug, vec: vecs[i], count: counts.get(slug) })));
+    const at = new Date().toISOString();
+    for (let i = 0; i < concepts.length; i += 500)
+      await result(db.from("concept").upsert(concepts.slice(i, i + 500).map((c) => ({ id: c.id, label: conceptText(c.id).slice(0, 120), model: EMBED_MODEL, vec: pack(c.vec), updated_at: at })), { onConflict: "id" }));
+    for (let i = 0; i < aliases.length; i += 500)
+      await result(db.from("concept_alias").upsert(aliases.slice(i, i + 500).map((a) => ({ ...a, updated_at: at })), { onConflict: "alias" }));
+    return { tags: counts.size, new: fresh.length, concepts: concepts.length, merged: aliases.filter((a) => a.alias !== a.concept_id).length };
+  } catch (error) {
+    if (!missingMigration(error)) throw error;
+    return { skipped: "apply supabase/migrations/202610040001_concepts.sql" };
+  }
 }
 
 /** In `cycle`, understanding is a bonus: a failed model download must not stop the posts arriving. */
@@ -262,12 +331,12 @@ async function candidateSummary() {
 }
 
 async function draft(config) {
-  const [groups, posts, states] = await Promise.all([loadSources(), all("post", POST_COLUMNS), all("user_post_state")]);
+  const [groups, posts, states, aliases] = await Promise.all([loadSources(), rankingPosts(), all("user_post_state"), loadAliases()]);
   // A held draft's article is retried once it is older than this, since the checks or models may have
   // improved since; otherwise one bad draft would lock that article out for good. 0 retries every run.
   const retryAfter = setting("CONTENT_RETRY_HELD_HOURS", 24, { min: 0, max: 720 }) * 3_600_000;
   const cutoff = Date.now() - retryAfter;
-  const { model } = await loadTaste(posts, states);
+  const { model } = await loadTaste(posts, states, new Map(), aliases);
   // When each source was last drafted, and which areas its posts fall in: for fair, gap-filling turns.
   const { lastDrafted, known, lookupKnown } = await draftedSoFar(cutoff);
   const postsByPublisher = new Map();
@@ -281,7 +350,8 @@ async function draft(config) {
   // Attempts since the last save belong to that candidate: the engine drafts, reviews, then saves, in order.
   const trace = [];
   return draftCandidates({
-    groups, concepts: recentConcepts(posts), preferences: promptSummary(model),
+    // Canonical spellings, so the drafting model reuses one tag per idea.
+    groups, concepts: [...new Set(recentConcepts(posts).map((c) => aliases.get(c) ?? c))], preferences: promptSummary(model),
     limit: setting("CONTENT_DRAFT_LIMIT", 8, { min: 1, max: 50 }),
     sourceChars: setting("CONTENT_SOURCE_CHARS", 10000, { min: 2000, max: 24000 }),
     known, lookupKnown,
@@ -382,6 +452,7 @@ async function publishChecked() {
       }));
       metrics.published++;
       if (excerpt) metrics.excerptsPublished++;
+      await recordAssumes(candidate.id, candidate.payload);
     } catch (error) {
       // Typically stale news or a candidate past its review window; it stays unpublished. An excerpt refused
       // for its missing insight, or for the columns it needs, means the database is a migration behind.
@@ -402,10 +473,10 @@ async function publishChecked() {
  */
 async function prepare() {
   const [posts, states, reader] = await Promise.all([
-    all("post", POST_COLUMNS), all("user_post_state"), result(db.from("allowed_reader").select("user_id").single()),
+    rankingPosts(), all("user_post_state"), result(db.from("allowed_reader").select("user_id").single()),
   ]);
-  const { vectors, clusters } = await loadUnderstanding();
-  const { model, queue } = await loadTaste(posts, states, clusters);
+  const [{ vectors, clusters }, aliases] = await Promise.all([loadUnderstanding(), loadAliases()]);
+  const { model, queue } = await loadTaste(posts, states, clusters, aliases);
   const byId = new Map(posts.map((p) => [p.id, p]));
   const assigned = queue.map((q) => byId.get(q.post_id)).filter(Boolean);
   const read = new Set(states.filter((s) => s.read_at).map((s) => s.post_id));
@@ -506,6 +577,9 @@ async function check() {
     await attempt("Migration 202610030001 (understanding)",
       async () => { await result(db.from("post_vec").select("post_id").limit(1)); await result(db.from("idea_cluster").select("id").limit(1)); },
       "apply supabase/migrations/202610030001_understanding.sql; until then posts are ranked without idea clusters");
+    await attempt("Migration 202610040001 (concepts)",
+      async () => { await result(db.from("post").select("assumes").limit(1)); await result(db.from("concept_alias").select("alias").limit(1)); },
+      "apply supabase/migrations/202610040001_concepts.sql; until then Harder works per field rather than per idea");
     await attempt("Enrolled reader", async () => {
       const rows = await result(db.from("allowed_reader").select("user_id"));
       if (rows.length !== 1) throw new Error(`${rows.length} enrolled`);
@@ -678,6 +752,7 @@ async function main() {
     const candidate = await result(db.from("content_candidate").select("*").eq("id", id ?? "").single());
     if (!passesChecks(candidate)) throw new Error("Candidate needs renewed checks");
     await result(db.rpc("publish_candidate", { p_id: id, p_note: note ?? "" }));
+    await recordAssumes(id, candidate.payload);
     console.log("Published reviewed candidate. Run prepare to append it to the reading queue.");
   } else if (command === "status") {
     const [summary, queue, states, budget, runs] = await Promise.all([
@@ -686,7 +761,7 @@ async function main() {
       result(db.from("content_run").select("*").order("started_at", { ascending: false }).limit(5)),
     ]);
     const read = new Set(states.filter((s) => s.read_at).map((s) => s.post_id));
-    const { model } = await loadTaste(await all("post", POST_COLUMNS), states);
+    const { model } = await loadTaste(await rankingPosts(), states, new Map(), await loadAliases());
     const pct = (v) => (v === null ? "not enough yet" : `${Math.round(v * 100)}%`);
     // Excerpts (no AI) by publisher: saved as candidates, published, in the feed, still unread.
     let excerpts;

@@ -24,7 +24,37 @@ export const UNDERSTANDING = {
   perCluster: 25,
   refreshDays: 7,
   growth: 0.2,
+  // Two concept tags at or above this similarity name the same idea and are folded into one concept.
+  // Deliberately strict: "machine-learning" and "deep-learning" must stay apart.
+  sameConcept: 0.85,
 };
+
+const SLUG = /^[a-z0-9][a-z0-9-]{1,62}$/;
+/** What the model reads of a concept tag: its words. */
+export const conceptText = (slug) => slug.replace(/-/g, " ");
+
+/**
+ * Fold new concept tags into canonical concepts. Commonest tags go first, so the usual spelling becomes the
+ * canonical one; each later tag joins the closest concept if similar enough, or becomes a concept itself.
+ * `existing`: canonical concepts already stored, [{ id, vec }]; `tags`: new tags, [{ slug, vec, count }].
+ * Returns the new concepts and an alias row for every new tag (a new concept is its own alias).
+ */
+export function foldConcepts(existing, tags, threshold = UNDERSTANDING.sameConcept) {
+  const canonical = [...existing];
+  const concepts = [], aliases = [];
+  const ordered = tags.filter((t) => SLUG.test(t.slug) && t.vec).sort((a, b) => (b.count ?? 0) - (a.count ?? 0) || a.slug.localeCompare(b.slug));
+  for (const tag of ordered) {
+    let best = null, bestSim = -Infinity;
+    for (const c of canonical) { const sim = cosine(tag.vec, c.vec); if (sim > bestSim) { bestSim = sim; best = c; } }
+    if (best && bestSim >= threshold) aliases.push({ alias: tag.slug, concept_id: best.id, similarity: Math.round(bestSim * 1000) / 1000 });
+    else {
+      const concept = { id: tag.slug, vec: tag.vec };
+      canonical.push(concept); concepts.push(concept);
+      aliases.push({ alias: tag.slug, concept_id: tag.slug, similarity: 1 });
+    }
+  }
+  return { concepts, aliases };
+}
 
 /**
  * What the model reads of a post: title, key insight and the first paragraph. The model sees 128 word pieces at

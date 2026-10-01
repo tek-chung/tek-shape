@@ -71,3 +71,21 @@ test("the similarity report is numbers only, for calibrating the duplicate thres
   assert.ok(UNDERSTANDING.near < UNDERSTANDING.duplicate);
   assert.equal(neighbourSpread([vectors[0]]), null);
 });
+
+test("concept tags meaning the same idea fold into one, the commonest spelling first", async () => {
+  const { foldConcepts } = await import("../../scripts/content/understand.mjs");
+  const random = seededRandom(11);
+  const quantumA = near(10, 0.03, random), quantumB = near(10, 0.03, random), learning = near(60, 0.03, random);
+  const { concepts, aliases } = foldConcepts([], [
+    { slug: "quantum-theory", vec: quantumB, count: 2 },
+    { slug: "quantum-mechanics", vec: quantumA, count: 9 },
+    { slug: "deep-learning", vec: learning, count: 3 },
+    { slug: "Bad Slug", vec: learning, count: 50 },
+  ]);
+  assert.deepEqual(concepts.map((c) => c.id), ["quantum-mechanics", "deep-learning"]);
+  const to = Object.fromEntries(aliases.map((a) => [a.alias, a.concept_id]));
+  assert.deepEqual(to, { "quantum-mechanics": "quantum-mechanics", "deep-learning": "deep-learning", "quantum-theory": "quantum-mechanics" });
+  const later = foldConcepts([{ id: "quantum-mechanics", vec: quantumA }], [{ slug: "quantum-physics", vec: quantumB, count: 1 }]);
+  assert.deepEqual([later.concepts.length, later.aliases[0].concept_id], [0, "quantum-mechanics"], "new tags join stored concepts");
+  assert.equal(foldConcepts([], [{ slug: "x-y", vec: quantumA }, { slug: "y-z", vec: learning }], 0.999).concepts.length, 2);
+});

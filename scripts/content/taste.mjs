@@ -41,6 +41,9 @@ export const SETTINGS = {
   // Each earlier post from the same publisher among the last ten placed multiplies a candidate's score by a
   // decaying factor, down to a floor (X's author diversity: 0.25 + 0.75 × 0.5^k).
   publisherDecay: { decay: 0.5, floor: 0.25, window: 10 },
+  // Depth ladders: reteaching a familiar idea (familiarity ≥ 0.8) scores ×0.7; a post whose prerequisites are at least half
+  // familiar and that teaches something new scores up to ×1.25, and may fill the stretch slot.
+  ladder: { reteach: 0.7, ready: 0.5, boost: 0.25, familiar: 0.8 },
   breadthWindow: 20,        // every area with posts available appears at least once in this many
   niche: { minMean: 0.7, lift: 0.12, minWeight: 0.8 },
   metricsWindow: 60,
@@ -115,7 +118,11 @@ const AREAS = taxonomy.umbrellas.filter((u) => u.id !== "other").map((u) => u.id
  * `clusters` (post id → idea cluster, from understand.mjs) adds a rung beside the subtopic: taste learnt on
  * one idea carries to the same idea under another subtopic name.
  */
-export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.now(), clusters = new Map() }) {
+export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.now(), clusters = new Map(), aliases = new Map() }) {
+  // Concept tags folded to canonical concepts (understand.mjs), so familiarity is per idea, not per spelling.
+  const canon = (c) => aliases.get(c) ?? c;
+  const conceptsOf = (post) => [...new Set((post.concept_ids ?? []).map(canon))];
+  const familiar = new Map();     // canonical concept → evidence the reader already knows it
   const stateById = new Map(states.map((s) => [s.post_id, s]));
   const postById = new Map(posts.map((p) => [p.id, p]));
   const nodes = new Map();
@@ -144,9 +151,13 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
       if (reward >= REWARDS.deeper) { n.positives++; n.lastPositive = Math.max(n.lastPositive, at); }
     }
     totalW += w; totalWR += w * reward;
-    for (const concept of post.concept_ids ?? []) {
+    // Familiarity: Harder says "I know this" outright; enjoying a post (deeper or better) counts half; a read
+    // a third, so three reads make an idea familiar. Not interesting says nothing about knowing.
+    const learnt = state.rating === "harder" ? 1 : reward >= REWARDS.deeper ? 0.5 : reward >= READ_MIN ? 0.34 : 0;
+    for (const concept of conceptsOf(post)) {
       if (reward >= REWARDS.deeper) liked.set(concept, (liked.get(concept) ?? 0) + w);
       if (reward <= REWARDS.skipped) disliked.set(concept, (disliked.get(concept) ?? 0) + w);
+      if (learnt) familiar.set(concept, (familiar.get(concept) ?? 0) + learnt * w);
     }
     const d = difficulty.get(place.field) ?? { w: 0, wd: 0, shift: 0 };
     if (reward >= READ_MIN) { d.w += w; d.wd += w * (post.difficulty ?? 2); }
@@ -259,7 +270,13 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
     return heavy * enjoyed;
   };
 
-  const conceptScore = (concepts, table) => clamp(0, 1, (concepts ?? []).reduce((sum, c) => sum + (table.get(c) ?? 0), 0) / 2);
+  const conceptScore = (concepts, table) => clamp(0, 1, [...new Set((concepts ?? []).map(canon))].reduce((sum, c) => sum + (table.get(c) ?? 0), 0) / 2);
+  const familiarity = (concept) => clamp(0, 1, familiar.get(canon(concept)) ?? 0);
+  /** How ready the reader is for a post: the mean familiarity of what it assumes; null if it assumes nothing. */
+  const readiness = (post) => {
+    const needs = [...new Set((post.assumes ?? []).map(canon))].filter((c) => !conceptsOf(post).includes(c));
+    return needs.length ? needs.reduce((sum, c) => sum + familiarity(c), 0) / needs.length : null;
+  };
 
   // The feed's report card, over the most recent posts it placed that now have an outcome.
   const resolved = queue
@@ -296,6 +313,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
   return {
     now, prior, exploreShare, metrics, niches: niches.slice(0, 8),
     estimate, pauseOf, fieldPause, prefFor, fatigue, clusterOf: (id) => clusters.get(id) ?? null, multiplier, targetDifficulty, gap, comfort, weightOf, meanOf, names, nodes,
+    canonical: canon, conceptsOf, familiarity, readiness,
     bridge: (concepts) => conceptScore(concepts, liked),
     avoid: (concepts) => conceptScore(concepts, disliked),
     publisherMean: (publisher) => meanOf(`p:${sourceOf(publisher)}`, prior, SETTINGS.publisherStrength),
@@ -311,23 +329,33 @@ function expected(model, post, known) {
   // An excerpt is the publisher's own summary, with no difficulty of its own to fit: neutral.
   const fit = post.kind === "excerpt" ? 1 : Math.exp(-(((post.difficulty ?? 2) - model.targetDifficulty(e.place.field)) ** 2) / 2);
   value *= (0.85 + 0.15 * fit) * model.multiplier(choice) * model.fatigue(e.place.field, e.sKey);
-  const concepts = post.concept_ids ?? [];
+  const concepts = model.conceptsOf ? model.conceptsOf(post) : post.concept_ids ?? [];
   const novelty = concepts.length ? concepts.filter((c) => !known.has(c)).length / concepts.length : 1;
   value *= 0.8 + 0.2 * novelty;
+  // Depth ladders. Reteaching what the reader already knows, at no greater difficulty, is scored down; a post
+  // that builds on what they know (its prerequisites familiar) and teaches something new is the next step.
+  const target = model.targetDifficulty(e.place.field);
+  const familiarity = model.familiarity ?? (() => 0);
+  const mastered = concepts.length ? Math.min(...concepts.map(familiarity)) : 0;
+  const reteach = mastered >= SETTINGS.ladder.familiar && (post.difficulty ?? 2) <= target;
+  if (reteach) value *= SETTINGS.ladder.reteach;
+  const ready = model.readiness ? model.readiness(post) : null;
+  const ladder = ready !== null && ready >= SETTINGS.ladder.ready && concepts.some((c) => familiarity(c) < 0.5) ? ready : 0;
+  if (ladder) value *= 1 + SETTINGS.ladder.boost * ladder;
   if (post.content_type === "news") {
     const age = (model.now - Date.parse(post.article_date ?? post.reviewed_at ?? model.now)) / DAY;
     value *= 1 - clamp(0, 0.3, age * 0.04);
   }
-  return { value, e, choice, novelty, fit };
+  return { value, e, choice, novelty, fit, ladder, reteach };
 }
 
 /** Names the ranker that placed a post, stored with each placement so rankers can be compared later. */
-export const RANKER = "taste-3";
+export const RANKER = "taste-4";
 const r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
 
 /**
  * Why a post was placed, in a few numbers and one plain reason code, stored with the placement (never
- * logged: it describes the reader's taste). Codes: favourite, excerpt, thin-area, bridge, uncertain,
+ * logged: it describes the reader's taste). Codes: favourite, excerpt, thin-area, bridge, uncertain, next-step,
  * breadth, harder.
  */
 function reasonsFor(pick, slot, why) {
@@ -337,6 +365,8 @@ function reasonsFor(pick, slot, why) {
     difficulty: pick.post.difficulty ?? null, target: r2(pick.target), gap: r2(pick.gap), bridge: r2(pick.bridge),
     ...(pick.choice ? { steer: pick.choice } : {}),
     ...(pick.fatigue < 1 ? { fatigue: r2(pick.fatigue) } : {}),
+    ...(pick.ladder ? { ladder: r2(pick.ladder) } : {}),
+    ...(pick.reteach ? { reteach: true } : {}),
   };
 }
 const exploreReason = (pick) => (pick.gap >= 0.5 ? "thin-area" : pick.bridge >= 0.25 ? "bridge" : "uncertain");
@@ -364,7 +394,8 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
   const twinOf = (post, vec, among) => among.find((other) => other.post.id !== post.id && cosine(vec, other.vec) >= UNDERSTANDING.duplicate
     && (post.difficulty ?? 2) <= (other.post.difficulty ?? 2));
   const assignedIds = new Set(assigned.map((p) => p.id));
-  const known = new Set(assigned.flatMap((p) => p.concept_ids ?? []));
+  const conceptsOf = model.conceptsOf ?? ((p) => p.concept_ids ?? []);
+  const known = new Set(assigned.flatMap(conceptsOf));
   const seenSubtopics = new Set(assigned.map((p) => subtopicKey(placeOf(p.field).field, p.subtopic)));
   const describe = (p) => {
     const place = placeOf(p.field);
@@ -378,7 +409,7 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
       && now - Date.parse(post.article_date) < 14 * DAY && Date.parse(post.article_date) <= now)) continue;
     const d = describe(post);
     if (model.pauseOf(d.field, d.subKey)) continue;
-    const concepts = post.concept_ids ?? [];
+    const concepts = conceptsOf(post);
     // A true repeat: every idea already in the feed, in a subtopic already covered.
     if (concepts.length && concepts.every((c) => known.has(c)) && seenSubtopics.has(d.subKey)) continue;
     if (d.vec && twinOf(post, d.vec, recentVectors)) continue;
@@ -397,6 +428,8 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
     d.gap = model.gap(d.umbrella);
     d.bridge = model.bridge(concepts);
     d.fatigue = model.fatigue(d.field, d.subKey);
+    d.ladder = x.ladder;
+    d.reteach = x.reteach;
     d.explore = (theta + 0.35 * model.gap(d.umbrella) + 0.2 * weakness + (weakArea ? 0.3 : 0.15) * model.bridge(concepts)
       - 0.3 * model.avoid(concepts) + 0.1 * x.e.uncertainty) * (1 - 0.5 * comfort) * model.multiplier(x.choice) * model.fatigue(d.field, d.subKey);
     const target = model.targetDifficulty(d.field);
@@ -461,6 +494,7 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
         // Breadth floor first: an area with posts waiting that has not appeared recently.
         const due = new Set(pool.map((c) => c.umbrella).filter((u) => u !== "other" && !recentUmbrellas.has(u)));
         if (due.size && (pick = best((c) => c.explore, (c) => due.has(c.umbrella)))) why = "breadth";
+        else if ((pick = best((c) => c.fav, (c) => c.ladder > 0))) why = "next-step";
         else if ((pick = best((c) => c.fav, (c) => c.harderStretch))) why = "harder";
         else if ((pick = best((c) => c.explore))) why = exploreReason(pick);
       } else if (!pick && slot === "explore") { pick = best((c) => c.explore); if (pick) why = exploreReason(pick); }
@@ -472,7 +506,7 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
         if (pool[i].vec && twinOf(pool[i].post, pool[i].vec, [{ post: pick.post, vec: pick.vec }])) pool.splice(i, 1);
       }
       history.push(pick); recentUmbrellas.add(pick.umbrella);
-      for (const c of pick.post.concept_ids ?? []) known.add(c);
+      for (const c of conceptsOf(pick.post)) known.add(c);
       picks.push({ id: pick.id, slot, reasons: reasonsFor(pick, slot, why) });
     }
   }

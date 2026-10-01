@@ -20,7 +20,7 @@ before(async () => {
   await db.exec(`insert into auth.users values('${reader}'),('${stranger}'); insert into public.allowed_reader(user_id) values('${reader}');`);
   for (const name of ["202609230001_content_engine", "202609240001_model_providers", "202609250001_unread_feed", "202609260001_knowledge_map",
     "202609270001_taste", "202609280001_feed_queued_at", "202609290001_controls_mark_read", "202609300001_excerpts", "202610010001_feed_reserve",
-    "202610020001_mixer_foundations", "202610030001_understanding"])
+    "202610020001_mixer_foundations", "202610030001_understanding", "202610040001_concepts"])
     await db.exec(await migration(name));
   for (const id of ["p0", "p1", "p2"]) {
     await db.query(`insert into public.post(id,topic,title,explanation,insight,deeper,status,verification_status,reviewed_at,concept_ids,sources,editorial_note)
@@ -42,4 +42,21 @@ test("post vectors and idea clusters are the engine's alone", async () => {
   }
   await db.exec("reset role; delete from public.post where id = 'p0'");
   assert.equal((await db.query("select count(*)::int n from public.post_vec")).rows[0].n, 0, "a deleted post takes its vector with it");
+});
+
+test("prerequisites live on the post; concepts and their aliases are the engine's alone", async () => {
+  await db.exec("reset role; set role service_role");
+  await db.query("update public.post set assumes = array['bayes-theorem'] where id = 'p1'");
+  await assert.rejects(db.query("update public.post set assumes = array['a','b','c','d','e','f','g','h','i'] where id = 'p1'"), /check/);
+  await db.query("insert into public.concept(id,label,model,vec) values('bayes-theorem','bayes theorem','m','AAAA')");
+  await db.query("insert into public.concept_alias(alias,concept_id,similarity) values('bayes-theorem','bayes-theorem',1),('bayes-rule','bayes-theorem',0.91)");
+  await assert.rejects(db.query("insert into public.concept_alias(alias,concept_id) values('Bad Tag','bayes-theorem')"), /check/);
+  await assert.rejects(db.query("insert into public.concept_alias(alias,concept_id) values('x-y','missing')"), /foreign key/);
+  for (const name of ["authenticated", "anon"]) {
+    await role(name, name === "anon" ? "" : reader);
+    await assert.rejects(db.query("select * from public.concept"), /permission denied/);
+    await assert.rejects(db.query("select * from public.concept_alias"), /permission denied/);
+  }
+  await db.exec("reset role; delete from public.concept where id = 'bayes-theorem'");
+  assert.equal((await db.query("select count(*)::int n from public.concept_alias")).rows[0].n, 0, "aliases go with their concept");
 });

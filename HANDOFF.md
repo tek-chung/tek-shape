@@ -480,7 +480,33 @@ Not pgvector, deliberately: one reader's catalogue is compared in the engine, an
   `aboveDuplicate`) and move `UNDERSTANDING.duplicate`/`near` if needed.
 - Tests: content 123 (understand 6, clusters and idea repeats in taste), SQL 66. Not run: the real model.
 
-Next T-Mixer phases (agreed plan, not started): 1b concept graph (canonical concepts, `assumes` in the draft
+Phase 1 committed as e9c4033; first `understand` on the owner's laptop: 400 embedded, 16 clusters, nearest-
+neighbour p50 0.50 / p90 0.67 / p99 0.89, 2 above 0.9, so the thresholds stand. Next.js 16.3.8 patch: 3e683e1.
+
+## 5t. T-Mixer phase 1b: concept graph and depth ladders (4 Oct 2026, Claude)
+
+Migration `202610040001_concepts.sql` (additive): `post.assumes text[]` (≤ 8), `concept` (canonical id, label,
+vector) and `concept_alias` (every tag → its concept, canonical ones included), service role only.
+
+- Draft schema gains `assumes` (plain string array; instruction says 0–5 prerequisites). `settleDraft` folds them
+  to slugs, drops the post's own concepts, caps at five; never holds a post. `publishChecked` and `publish`
+  write them with `recordAssumes` after `publish_candidate` (that function is untouched); skipped before the
+  migration. Older posts have none, so ladders grow with new drafts.
+- `understand` also runs `understandConcepts`: tags (taught and assumed) not yet aliased are embedded as words
+  and folded by `foldConcepts` (≥ 0.85, commonest first; up to `CONTENT_CONCEPT_LIMIT` 3000 per run). Counts only.
+- `taste.mjs` (ranker `taste-4`): `buildTaste({ aliases })` → `canonical`, `conceptsOf`, `familiarity` (Harder 1,
+  deeper-or-better 0.5, read 0.34, faded by the 60-day half-life; Not interesting 0) and `readiness` (mean
+  familiarity of a post's prerequisites). `expected` applies reteach ×0.7 (all taught concepts ≥ 0.8 and
+  difficulty ≤ target) and ladder up to ×1.25 (readiness ≥ 0.5, something new). Stretch slot tries
+  `next-step` before `harder`; reasons carry `ladder`/`reteach`. Known-concept repeats use canonical concepts;
+  the drafting prompt's concept list uses canonical spellings.
+- `rankingPosts()` reads `assumes` when present; `loadAliases()` feeds draft, prepare and status.
+- Tests: content 126, SQL 67, client 7. Not run: a real draft with `assumes` (Gemini schema acceptance —
+  run `npm run content -- probe` first), the concept fold on real tags.
+
+Next T-Mixer phases (agreed plan, not started): 3 mixer with seven sources and quotas (Stem picker),
+4 demand-led drafting (headline embeddings), 5 surfaces (Why this?, Your T, Dear T, Latest, Briefing ring,
+Atlas, Tracks). Earlier list, for reference: 1b concept graph (canonical concepts, `assumes` in the draft
 schema, depth ladders), 3 mixer with seven sources, 4 demand-led drafting (headline embeddings), 5 surfaces.
 Earlier list, for reference: 1 understanding (embeddings, idea clusters, concept graph;
 needs a choice between a local transformers.js model and Gemini's embedding API), 2 multi-head value model
