@@ -145,7 +145,12 @@ All in `scripts/content/taste.mjs` (pure functions; tests in `tests/content/tast
    field only when 3 of its subtopics rest; an area never. Map steering (More / Less / Snooze) overrides. A
    single Not interesting dims its subtopic instead: 0.2× at once, recovering evenly over 42 days, or at once
    if something there is enjoyed again (after X's feedback fatigue).
-4. **Feed batches of 10** (`rankQueue`): favourites by expected enjoyment (difficulty fit, novelty, news age,
+4. **Feed batches of 10** (`rankQueue`, shared by `mixer.mjs` since ranker `mixer-1`): each batch is split between
+   six sources — stem 35% (your 1–3 deep fields, chosen on the Map with Stem, else your two clearest favourites),
+   bar 30% (areas read least, accessible difficulty; its first slot keeps the breadth floor), bridges 10%,
+   trusted sources 10%, exploration 10%, news 5% — opening with the stem and spread evenly. Shares move by up
+   to ±30% with how each source's posts land, with floors for breadth (20%) and exploration (5%). Within each
+   source, as before: favourites by expected enjoyment (difficulty fit, novelty, news age,
    source); explorations by Thompson sampling, weighted to thin or weak areas, approached through concepts the
    reader already likes, discounted in comfort-zone areas; one stretch post (an area missing from the last 20,
    else a harder post where Harder was asked). Exploration share self-tunes between 15% and 30%.

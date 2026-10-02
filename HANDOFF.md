@@ -504,7 +504,28 @@ vector) and `concept_alias` (every tag → its concept, canonical ones included)
 - Tests: content 126, SQL 67, client 7. Not run: a real draft with `assumes` (Gemini schema acceptance —
   run `npm run content -- probe` first), the concept fold on real tags.
 
-Next T-Mixer phases (agreed plan, not started): 3 mixer with seven sources and quotas (Stem picker),
+## 5u. T-Mixer phase 3: the mixer (5 Oct 2026, Claude)
+
+Migration `202610050001_stem.sql` (additive): `topic_preference.choice` gains `stem` (fields only, three at
+most, enforced in `set_topic_preference`). `check` cannot detect it (the service role is refused by the
+reader gate either way), so apply it with the rest.
+
+- `scripts/content/mixer.mjs`: `SOURCES` (stem .35, bar .30, bridges .10, trusted .10, wild .10, fresh .05),
+  `mixShares` (±30% by each source's hit rate vs the feed's, after 8 outcomes; floors bar .20, wild .05),
+  `apportion` (whole slots, remainders by weighted chance), `spread` (stem opens, smooth weighted round
+  robin), `stemFieldsOf` (chosen, else two learnt: weight ≥ 2.5, mean ≥ prior + .05), `trustedOf`.
+- `taste.mjs` (ranker `mixer-1`): `buildTaste` computes `shares`/`bySource` from `feed_queue.reasons.source`,
+  `stemFields`, `stemChosen`, `trusted`; "stem" counts as More for multipliers, pauses and fatigue.
+  `rankQueue` replaces the favourite/explore/stretch layout with per-source pickers and a fallback chain
+  (stem → trusted → bar → wild → any). Slot column kept for the report card: stem/trusted/fresh/excerpt →
+  favourite, bar breadth-floor → stretch, other bar/bridges/wild → explore. The excerpt place and every
+  earlier rule (variety ladder, publisher decay, idea repeats, ladders) stay. Echoes deferred to surfaces.
+- Map: Stem button on a field (fourth refused with a clear notice), "Your stem" section with the mix;
+  snapshot carries `stem`, `stemChosen`, `shares`. `prepare` prints the mix and the number of stem fields
+  only; `status` (local) names them.
+- Tests: content 129 (mixer 3; batch, reasons, bridges and ladder tests rewritten for sources), SQL 68.
+
+Next T-Mixer phases (agreed plan, not started): 4 demand-led drafting (headline embeddings),
 4 demand-led drafting (headline embeddings), 5 surfaces (Why this?, Your T, Dear T, Latest, Briefing ring,
 Atlas, Tracks). Earlier list, for reference: 1b concept graph (canonical concepts, `assumes` in the draft
 schema, depth ladders), 3 mixer with seven sources, 4 demand-led drafting (headline embeddings), 5 surfaces.

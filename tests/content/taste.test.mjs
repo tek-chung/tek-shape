@@ -72,21 +72,25 @@ test("a subtopic loved inside an area you otherwise dislike is reported as a dis
   assert.equal(snapshotOf(model).niches[0].umbrella, "economics-business");
 });
 
-test("the feed is built in batches: mostly favourites, some explorations, one stretch; varied and without repeats", () => {
+test("each batch is shared between sources: the stem opens it, breadth and exploration have their places; varied, no repeats", () => {
   const history = [];
   const fields = ["algebra-number-theory", "quantum-physics", "ethics", "artificial-intelligence", "modern-history", "neuroscience"];
   for (const f of fields) for (let i = 0; i < 3; i++) history.push(post(f, `${f} ${i}`));
-  const states = history.map((p, i) => (i % 3 === 0 ? disliked(p) : liked(p)));
+  // Quantum physics and ethics are clear favourites; the rest are liked one time in three.
+  const states = history.map((p) => (["quantum-physics", "ethics"].includes(p.field) || p.subtopic.endsWith(" 0") ? liked(p) : disliked(p)));
   const model = buildTaste({ posts: history, states, now });
+  assert.deepEqual([...model.stemFields].sort(), ["ethics", "quantum-physics"], "with none chosen, the stem is learnt");
   const candidates = fields.flatMap((f) => [1, 2, 3, 4, 5].map((i) => post(f, `${f} new ${i}`)));
   const picks = rankQueue({ model, candidates, assigned: history, need: 10, now, random: seededRandom(7) });
   assert.equal(picks.length, 10);
-  const slots = picks.map((p) => p.slot);
-  assert.equal(slots.filter((s) => s === "stretch").length, 1);
-  assert.ok(slots.filter((s) => s === "explore").length >= 1);
-  assert.ok(slots.filter((s) => s === "favourite").length >= 7);
-  assert.equal(slots[0], "favourite", "the batch opens with a favourite");
+  const sources = picks.map((p) => p.reasons.source);
+  assert.equal(sources[0], "stem", "the batch opens in the stem");
+  assert.ok(sources.filter((s) => s === "stem").length >= 3, sources.join());
+  assert.ok(sources.filter((s) => s === "bar").length >= 2, sources.join());
+  assert.ok(picks.some((p) => p.slot === "explore"), "exploration has a place");
   const byId = new Map(candidates.map((c) => [c.id, c]));
+  for (const p of picks.filter((p) => p.reasons.source === "stem")) assert.ok(model.stemFields.has(byId.get(p.id).field));
+  for (const p of picks.filter((p) => p.reasons.source === "bar")) assert.ok(!model.stemFields.has(byId.get(p.id).field), "the bar is breadth beyond the stem");
   const chosen = picks.map((p) => byId.get(p.id).field);
   for (let i = 1; i < chosen.length; i++) assert.notEqual(chosen[i], chosen[i - 1], "never two in a row from the same field");
   assert.equal(new Set(picks.map((p) => p.id)).size, 10);
@@ -99,13 +103,13 @@ test("every placement says why, in a small record fit to store and never to log"
   const model = buildTaste({ posts: history, states: history.map((p) => liked(p)), now });
   const candidates = [...fields, "earth-sciences", "law-rights"].flatMap((f) => [1, 2, 3].map((i) => post(f, `${f} new ${i}`)));
   const picks = rankQueue({ model, candidates, assigned: history, need: 10, now, random: seededRandom(5) });
-  const codes = new Set(["favourite", "excerpt", "thin-area", "bridge", "uncertain", "breadth", "harder", "next-step"]);
+  const codes = new Set(["favourite", "excerpt", "thin-area", "bar", "bridge", "uncertain", "breadth", "harder", "next-step", "stem", "trusted", "fresh"]);
   for (const pick of picks) {
     assert.equal(pick.reasons.v, 1);
     assert.equal(pick.reasons.slot, pick.slot);
     assert.ok(codes.has(pick.reasons.why), pick.reasons.why);
     assert.ok(JSON.stringify(pick.reasons).length < 2000, "fits the database's limit");
-    if (pick.slot === "favourite") assert.ok(["favourite", "excerpt"].includes(pick.reasons.why));
+    assert.ok(["stem", "bar", "bridges", "trusted", "wild", "fresh", "any"].includes(pick.reasons.source), pick.reasons.source);
   }
   // Politics & society is missing from the reading so far: it is placed, and placed as breadth or a thin area.
   const unread = picks.find((p) => p.reasons.field === "law-rights");
@@ -147,11 +151,12 @@ test("in an area you like less, exploration approaches through ideas you already
   const others = lovedFields.flatMap((f) => [1, 2, 3].map((i) => post(f, `${f} fresh ${i}`, { concept_ids: [`${f}-fresh-${i}`] })));
   let bridgeWins = 0, plainWins = 0;
   for (let seed = 1; seed <= 40; seed++) {
-    const first = rankQueue({ model, candidates: [plain, bridge, ...others], assigned: [], need: 10, now, random: seededRandom(seed) }).find((p) => p.slot === "explore")?.id;
-    if (first === bridge.id) bridgeWins++;
-    if (first === plain.id) plainWins++;
+    const order = rankQueue({ model, candidates: [plain, bridge, ...others], assigned: [], need: 10, now, random: seededRandom(seed) }).map((p) => p.id);
+    const at = (id) => (order.includes(id) ? order.indexOf(id) : Infinity);
+    if (at(bridge.id) < at(plain.id)) bridgeWins++;
+    if (at(plain.id) < at(bridge.id)) plainWins++;
   }
-  assert.ok(bridgeWins > 20 && bridgeWins > 2.5 * plainWins, `the bridging post is explored first most of the time (${bridgeWins} vs ${plainWins} of 40)`);
+  assert.ok(bridgeWins > 30, `the post that shares a liked idea is placed first into the unread area (${bridgeWins} vs ${plainWins} of 40)`);
 });
 
 test("exploration earns its share: it shrinks when explorations miss, but never below 15%", () => {
@@ -340,8 +345,8 @@ test("depth ladders: Harder makes an idea familiar, so it is not retaught, and p
   const why = Object.fromEntries(picks.map((p) => [p.id, p.reasons]));
   assert.ok(why[next.id]?.ladder > 0.95, "the post built on Bayes is marked as the next step");
   const order = picks.map((p) => p.id);
-  assert.ok(order.indexOf(next.id) < order.indexOf(plain.id), "and ranks above an otherwise similar post");
-  if (order.includes(again.id)) assert.ok(order.indexOf(again.id) > order.indexOf(next.id), "the restatement comes last, if at all");
+  assert.ok(why[next.id].value > why[plain.id].value, "and is valued above an otherwise similar post");
+  if (order.includes(again.id)) assert.ok(why[again.id].value < why[next.id].value, "the restatement is valued below it");
   if (order.includes(again.id)) assert.equal(why[again.id].reteach, true, "and is marked as reteaching");
   assert.equal(why[plain.id].reteach, undefined);
 });

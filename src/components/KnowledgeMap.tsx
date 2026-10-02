@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ArrowLeft, BookOpen, CheckCheck, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
 import { buildMap, coerceRows, type FieldNode, type KnowledgeMap as MapData, type Tally, type UmbrellaNode } from "@/lib/knowledgeMap";
-import { coerceTaste, subtopicKey, type Choice, type Pause, type Preference, type TasteSnapshot } from "@/lib/taste";
+import { SOURCES, coerceTaste, subtopicKey, type Choice, type Pause, type Preference, type TasteSnapshot } from "@/lib/taste";
 import { placeOf } from "@/lib/taxonomy";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -24,9 +24,13 @@ function Signals({ t }: { t: Tally }) {
     <span key={label} title={`${n} ${label}`}><Icon size={13} aria-hidden="true" />{n}<span className="sr-only"> {label}</span></span>)}</span>;
 }
 
-/** More / Less / Snooze for one field or subtopic. Tapping the active choice clears it. */
-function Steer({ label, choice, busy, onChoose }: { label: string; choice: Choice | null; busy: boolean; onChoose: (c: Choice | null) => void }) {
+/**
+ * More / Less / Snooze for one field or subtopic, and for a field, Stem: one of your (at most three) deep
+ * fields, which the feed gives about a third of every batch. Tapping the active choice clears it.
+ */
+function Steer({ label, choice, busy, onChoose, stem = false }: { label: string; choice: Choice | null; busy: boolean; onChoose: (c: Choice | null) => void; stem?: boolean }) {
   const options: { value: Choice; text: string; hint: string }[] = [
+    ...(stem ? [{ value: "stem" as const, text: "Stem", hint: `Make ${label} one of your deep fields` }] : []),
     { value: "more", text: "More", hint: `Show more ${label}` },
     { value: "less", text: "Less", hint: `Show less ${label}` },
     { value: "snooze", text: "Snooze", hint: `Pause ${label} for 30 days` },
@@ -35,6 +39,21 @@ function Steer({ label, choice, busy, onChoose }: { label: string; choice: Choic
     {options.map((o) => <button key={o.value} type="button" className="steer-button" disabled={busy} aria-pressed={choice === o.value}
       title={o.hint} aria-label={o.hint} onClick={() => onChoose(choice === o.value ? null : o.value)}>{o.text}</button>)}
   </div>;
+}
+
+const SOURCE_LABELS: Record<string, string> = { stem: "your stem", bar: "breadth", bridges: "bridges", trusted: "trusted sources", wild: "exploring", fresh: "news" };
+
+/** Your stem, and how the feed shares each batch between its sources. */
+function Stem({ snapshot }: { snapshot: TasteSnapshot }) {
+  const names = snapshot.stem.map((id) => placeOf(id)?.field.label ?? id);
+  const mix = SOURCES.filter((k) => snapshot.shares[k]).map((k) => `${SOURCE_LABELS[k]} ${pct(snapshot.shares[k])}`).join(" · ");
+  return <section className="map-section" aria-labelledby="stem-title">
+    <h3 id="stem-title" className="map-subtitle">Your stem</h3>
+    <p className="map-note">{names.length
+      ? <>{names.join(", ")}{snapshot.stemChosen ? ", as you chose." : ": learnt from your reading. Open a field and tap Stem to choose up to three yourself."}</>
+      : "Not settled yet. Open a field and tap Stem to choose up to three deep fields, or keep reading and the feed will learn them."}</p>
+    {mix ? <p className="map-note">Each batch: {mix}.</p> : null}
+  </section>;
 }
 
 /** A horizontal depth bar with its figures, used for fields and subtopics. */
@@ -136,11 +155,13 @@ export function KnowledgeMap({ client }: { client: SupabaseClient }) {
     try {
       const { error: rpcError } = await client.rpc("set_topic_preference", { p_scope: scope, p_key: key, p_choice: choice });
       if (rpcError) throw rpcError;
-      setNotice(choice === "more" ? `More ${label} from the next update.` : choice === "less" ? `Less ${label} from the next update.`
+      setNotice(choice === "stem" ? `${label} is now one of your deep fields: about a third of each batch goes to your stem.` : choice === "more" ? `More ${label} from the next update.` : choice === "less" ? `Less ${label} from the next update.`
         : choice === "snooze" ? `${label} paused for 30 days.` : `${label}: back to normal.`);
-    } catch {
+    } catch (error) {
       setPrefs(before);
-      setNotice("That change could not be saved. Check your connection and try again.");
+      setNotice(/Three stem fields/.test(String((error as { message?: unknown })?.message ?? ""))
+        ? "Your stem has three fields already. Tap Stem on one of them to free a place."
+        : "That change could not be saved. Check your connection and try again.");
     } finally { setBusy(false); }
   }
 
@@ -161,7 +182,7 @@ export function KnowledgeMap({ client }: { client: SupabaseClient }) {
       <p className="map-note">{field.read ? `${plural(field.read, "post")} read across ${plural(field.subtopics.filter((s) => s.read).length, "subtopic")}.` : "Nothing read here yet. Posts in this field will appear in your feed as they arrive."}
         {taste ? ` You enjoy about ${pct(taste.mean)} of what you read here; posts aim at difficulty ${taste.targetDifficulty.toFixed(1)} of 5.` : ""}</p>
       {pauseNote(taste?.paused ?? null) ? <p className="map-note map-paused">{pauseNote(taste?.paused ?? null)}. Tap More to bring it back.</p> : null}
-      <Steer label={fieldLabel} choice={choiceOf("field", field.field.id)} busy={busy} onChoose={(c) => void steer("field", field.field.id, field.field.label, c)} />
+      <Steer stem label={fieldLabel} choice={choiceOf("field", field.field.id)} busy={busy} onChoose={(c) => void steer("field", field.field.id, field.field.label, c)} />
       {status}
       <ul className="map-list">{field.subtopics.map((s) => {
         const key = subtopicKey(field.field.id, s.name);
@@ -185,7 +206,8 @@ export function KnowledgeMap({ client }: { client: SupabaseClient }) {
         const taste = snapshot?.fields.find((x) => x.field === f.field.id);
         const choice = choiceOf("field", f.field.id);
         const notes = [taste && taste.weight >= 0.5 ? `${pct(taste.mean)} enjoyed` : null, pauseNote(taste?.paused ?? null),
-          choice ? `you asked for ${choice === "snooze" ? "a pause" : choice}` : null].filter(Boolean).join(" · ");
+          choice === "stem" ? "one of your deep fields" : choice ? `you asked for ${choice === "snooze" ? "a pause" : choice}` : null,
+          choice !== "stem" && snapshot?.stem.includes(f.field.id) ? "in your stem (learnt)" : null].filter(Boolean).join(" · ");
         return <Row key={f.field.id} name={f.field.label} t={f} max={max} note={notes} onOpen={() => go(umbrella.umbrella.id, f.field.id)} />;
       })}</ul>
     </section>;
@@ -197,6 +219,7 @@ export function KnowledgeMap({ client }: { client: SupabaseClient }) {
       ? <p className="map-note">Read a few posts and your map will start to take shape here.</p>
       : <p className="map-note"><strong>Breadth:</strong> {map.breadth} of {map.areas} areas. {map.deepest ? <><strong>Deepest:</strong> {map.deepest.umbrella.label}.</> : null}</p>}
     <TShape map={map} onOpen={(u) => go(u.umbrella.id)} />
+    {snapshot ? <Stem snapshot={snapshot} /> : null}
     <p className="map-legend">Across the top: breadth, tinted where you have read. Hanging below: depth, from the number and difficulty of posts read and the deeper explanations opened. Tap an area to see its fields, then a field to see and steer its subtopics.</p>
     {snapshot ? <><Niches snapshot={snapshot} onOpen={(u, f) => go(u, f)} /><ReportCard snapshot={snapshot} /></> : null}
   </section>;

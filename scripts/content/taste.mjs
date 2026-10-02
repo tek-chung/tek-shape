@@ -1,5 +1,6 @@
 import { cleanSubtopic, placeOf, taxonomy } from "./taxonomy.mjs";
 import { UNDERSTANDING, cosine } from "./understand.mjs";
+import { apportion, mixShares, spread, stemFieldsOf, trustedOf } from "./mixer.mjs";
 
 /**
  * The reader's taste, learned from every signal, and the feed built from it.
@@ -180,7 +181,9 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
     pref.set(`${p.scope}:${p.key}`, p);
   }
   const prefFor = (field, sKey) => pref.get(`subtopic:${sKey}`) ?? pref.get(`field:${field}`) ?? null;
-  const multiplier = (choice) => (choice === "more" ? 1.25 : choice === "less" ? 0.7 : 1);
+  // "stem" (a field chosen as one of the reader's deep fields on the Map) counts as More, and more.
+  const keen = (choice) => choice === "more" || choice === "stem";
+  const multiplier = (choice) => (keen(choice) ? 1.25 : choice === "less" ? 0.7 : 1);
 
   // Learned pauses: a subtopic with repeated "Not interesting" and nothing positive rests for 30 days after the
   // latest dislike, then gets one more try. A field rests only when several of its subtopics do.
@@ -223,7 +226,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
   /** Why, if at all, a whole field is resting now. */
   const fieldPause = (field) => {
     const p = pref.get(`field:${field}`);
-    if (p?.choice === "more") return null;
+    if (keen(p?.choice)) return null;
     if (p?.choice === "snooze") return { by: "you", until: p.until ? Date.parse(p.until) : null };
     const f = pausedByField.get(field);
     if (f && f.count >= SETTINGS.snooze.subtopicsForField && meanOf(`f:${field}`, prior) < prior) return { by: "feed", until: f.until };
@@ -232,11 +235,11 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
   /** Why, if at all, this subtopic is resting now, on its own account or its field's. */
   const pauseOf = (field, sKey) => {
     const p = pref.get(`subtopic:${sKey}`);
-    if (p?.choice === "more") return null;
+    if (keen(p?.choice)) return null;
     if (p?.choice === "snooze") return { by: "you", until: p.until ? Date.parse(p.until) : null };
     if (p?.choice !== "less") {
       const sub = learnedSubtopic(sKey);
-      if (sub && pref.get(`field:${field}`)?.choice !== "more") return { by: "feed", until: sub };
+      if (sub && !keen(pref.get(`field:${field}`)?.choice)) return { by: "feed", until: sub };
     }
     return fieldPause(field);
   };
@@ -245,7 +248,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
   const fatigue = (field, sKey) => {
     const n = nodes.get(`s:${sKey}`);
     if (!n?.lastDislike || n.lastPositive > n.lastDislike) return 1;
-    if (pref.get(`subtopic:${sKey}`)?.choice === "more" || pref.get(`field:${field}`)?.choice === "more") return 1;
+    if (keen(pref.get(`subtopic:${sKey}`)?.choice) || keen(pref.get(`field:${field}`)?.choice)) return 1;
     const age = Math.max(0, now - n.lastDislike) / (SETTINGS.fatigue.days * DAY);
     return age >= 1 ? 1 : SETTINGS.fatigue.floor + (1 - SETTINGS.fatigue.floor) * age;
   };
@@ -299,6 +302,26 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
     : clamp(SETTINGS.explore.min, SETTINGS.explore.max,
       SETTINGS.explore.min + (SETTINGS.explore.max - SETTINGS.explore.min) * clamp(0, 1, metrics.explorationHitRate / Math.max(metrics.hitRate, 0.1)));
 
+  // The mixer's inputs: how each source's placements have landed, the stem fields and the trusted sources.
+  const bySource = {};
+  for (const r of queue.map((q) => ({ q, reward: rewardOf(stateById.get(q.post_id), now, postById.get(q.post_id)) }))
+    .filter((r) => r.reward !== null && r.q.reasons?.source).sort((a, b) => (b.q.position ?? 0) - (a.q.position ?? 0)).slice(0, 4 * SETTINGS.metricsWindow)) {
+    const s = (bySource[r.q.reasons.source] ??= { n: 0, hits: 0 });
+    s.n++; if (r.reward >= READ_MIN) s.hits++;
+  }
+  const shares = mixShares(bySource, metrics.hitRate);
+  const fieldRows = [];
+  const publisherRows = [];
+  for (const [key, n] of nodes) {
+    if (key.startsWith("f:")) {
+      const field = key.slice(2);
+      fieldRows.push({ field, weight: n.w, mean: meanOf(key, meanOf(`u:${placeOf(field).umbrella}`, prior)) });
+    } else if (key.startsWith("p:")) publisherRows.push({ publisher: key.slice(2), weight: n.w, mean: meanOf(key, prior, SETTINGS.publisherStrength) });
+  }
+  const chosenStem = prefs.filter((p) => p.scope === "field" && p.choice === "stem").map((p) => p.key);
+  const stemFields = stemFieldsOf({ chosen: chosenStem, fields: fieldRows, prior });
+  const trusted = trustedOf({ publishers: publisherRows, prior });
+
   // Discovered niches: subtopics you clearly enjoy inside an area you otherwise read less or like less.
   const niches = [];
   for (const [key, n] of nodes) {
@@ -312,6 +335,7 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
 
   return {
     now, prior, exploreShare, metrics, niches: niches.slice(0, 8),
+    shares, bySource, stemFields, stemChosen: chosenStem.length > 0, trusted,
     estimate, pauseOf, fieldPause, prefFor, fatigue, clusterOf: (id) => clusters.get(id) ?? null, multiplier, targetDifficulty, gap, comfort, weightOf, meanOf, names, nodes,
     canonical: canon, conceptsOf, familiarity, readiness,
     bridge: (concepts) => conceptScore(concepts, liked),
@@ -350,12 +374,13 @@ function expected(model, post, known) {
 }
 
 /** Names the ranker that placed a post, stored with each placement so rankers can be compared later. */
-export const RANKER = "taste-4";
+export const RANKER = "mixer-1";
 const r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
 
 /**
  * Why a post was placed, in a few numbers and one plain reason code, stored with the placement (never
- * logged: it describes the reader's taste). Codes: favourite, excerpt, thin-area, bridge, uncertain, next-step,
+ * logged: it describes the reader's taste). Codes: favourite, excerpt, thin-area, bar, bridge, uncertain, next-step, stem,
+ * trusted, fresh,
  * breadth, harder.
  */
 function reasonsFor(pick, slot, why) {
@@ -370,17 +395,6 @@ function reasonsFor(pick, slot, why) {
   };
 }
 const exploreReason = (pick) => (pick.gap >= 0.5 ? "thin-area" : pick.bridge >= 0.25 ? "bridge" : "uncertain");
-
-/** Where to put the batch's specials (explorations and the stretch), spread out, never at the very top. */
-function layout(batch, explores) {
-  const specials = explores + 1;
-  const positions = Array.from({ length: specials }, (_, k) => Math.min(batch - 1, Math.max(1, Math.round((k + 0.5) * batch / specials))));
-  const stretchAt = positions[Math.floor(specials / 2)];
-  const slots = Array.from({ length: batch }, () => "favourite");
-  for (const p of positions) slots[p] = "explore";
-  slots[stretchAt] = "stretch";
-  return slots;
-}
 
 /**
  * Choose and order the next `need` posts. Returns [{ id, slot }] where slot is favourite, explore or stretch.
@@ -435,6 +449,10 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
     const target = model.targetDifficulty(d.field);
     d.target = target;
     d.harderStretch = (post.difficulty ?? 2) >= target + 0.5 && target > 2.5;
+    d.inStem = model.stemFields?.has(d.field) ?? false;
+    d.trusted = model.trusted?.has(d.publisher) ?? false;
+    d.news = post.content_type === "news";
+    d.accessible = post.kind === "excerpt" || (post.difficulty ?? 2) <= target + 0.5;
     pool.push(d);
   }
 
@@ -473,33 +491,48 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
     return null;
   };
 
+  // Each source's choice, and what to fall back on when it has nothing to offer. `first` marks the batch's
+  // first bar slot, which serves the breadth floor: an area with posts waiting that has not appeared recently.
+  const pickers = {
+    stem: () => [best((c) => c.fav * (c.harderStretch ? 1.15 : 1), (c) => c.inStem), (c) => (c.ladder ? "next-step" : "stem")],
+    trusted: () => [best((c) => c.fav, (c) => c.trusted), () => "trusted"],
+    fresh: () => [best((c) => c.fav, (c) => c.news), () => "fresh"],
+    bar: (first) => {
+      const due = first ? new Set(pool.map((c) => c.umbrella).filter((u) => u !== "other" && !recentUmbrellas.has(u))) : new Set();
+      const floor = due.size ? best((c) => c.explore, (c) => due.has(c.umbrella)) : null;
+      if (floor) return [floor, () => "breadth"];
+      return [best((c) => c.fav * (0.6 + 0.8 * c.gap), (c) => !c.inStem && c.accessible), (c) => (c.gap >= 0.5 ? "thin-area" : "bar")];
+    },
+    bridges: () => [best((c) => c.explore, (c) => !c.inStem && c.bridge >= 0.15), () => "bridge"],
+    wild: () => [best((c) => c.explore), exploreReason],
+    any: () => [best((c) => c.fav), () => "favourite"],
+  };
+  const FALLBACK = ["stem", "trusted", "bar", "wild", "any"];
+  const slotOf = (source, why) => (why === "breadth" ? "stretch" : ["bar", "bridges", "wild"].includes(source) ? "explore" : "favourite");
+
   while (picks.length < need && pool.length) {
     const size = Math.min(SETTINGS.batch, need - picks.length);
-    const raw = SETTINGS.batch * model.exploreShare - 1;
-    const explores = Math.max(0, Math.floor(raw) + (random() < raw - Math.floor(raw) ? 1 : 0));
-    const slots = layout(SETTINGS.batch, explores).slice(0, size);
+    const order = spread(apportion(model.shares ?? { any: 1 }, SETTINGS.batch, random)).slice(0, size);
     // Excerpt sources (no AI) were asked for by name, but a one-paragraph excerpt rarely outscores a full post,
-    // so one favourite slot per batch goes to the best waiting excerpt — unless the reader has come to dislike
-    // what is on offer, which the taste model then says.
-    const excerptAt = slots.length >= 2 ? slots.findIndex((s, i) => i >= Math.min(3, slots.length - 1) && s === "favourite") : -1;
-    for (const [index, slot] of slots.entries()) {
+    // so one place per batch goes to the best waiting excerpt — unless the reader has come to dislike what is on
+    // offer, which the taste model then says.
+    const excerptAt = order.length >= 2 ? Math.min(3, order.length - 1) : -1;
+    let barSeen = false;
+    for (const [index, wanted] of order.entries()) {
       if (!pool.length) break;
-      let pick = null;
-      let why = slot;
+      let pick = null, why = null, source = wanted;
       if (index === excerptAt) {
         const offer = best((c) => c.fav, (c) => c.excerpt);
-        if (offer && offer.fav >= 0.6 * model.prior) { pick = offer; why = "excerpt"; }
+        if (offer && offer.fav >= 0.6 * model.prior) { pick = offer; why = "excerpt"; source = "trusted"; }
       }
-      if (!pick && slot === "stretch") {
-        // Breadth floor first: an area with posts waiting that has not appeared recently.
-        const due = new Set(pool.map((c) => c.umbrella).filter((u) => u !== "other" && !recentUmbrellas.has(u)));
-        if (due.size && (pick = best((c) => c.explore, (c) => due.has(c.umbrella)))) why = "breadth";
-        else if ((pick = best((c) => c.fav, (c) => c.ladder > 0))) why = "next-step";
-        else if ((pick = best((c) => c.fav, (c) => c.harderStretch))) why = "harder";
-        else if ((pick = best((c) => c.explore))) why = exploreReason(pick);
-      } else if (!pick && slot === "explore") { pick = best((c) => c.explore); if (pick) why = exploreReason(pick); }
-      else if (!pick) pick = best((c) => c.fav);
+      for (const candidate of [wanted, ...FALLBACK.filter((f) => f !== wanted)]) {
+        if (pick) break;
+        const [found, reason] = pickers[candidate](candidate === "bar" && !barSeen);
+        if (found) { pick = found; why = reason(found); source = candidate; }
+      }
       if (!pick) break;
+      if (source === "bar") barSeen = true;
+      const slot = slotOf(source, why);
       pool.splice(pool.indexOf(pick), 1);
       // The same idea in other words, waiting in the pool, is not placed after it.
       if (pick.vec) for (let i = pool.length - 1; i >= 0; i--) {
@@ -507,7 +540,7 @@ export function rankQueue({ model, candidates, assigned, need, now = Date.now(),
       }
       history.push(pick); recentUmbrellas.add(pick.umbrella);
       for (const c of conceptsOf(pick.post)) known.add(c);
-      picks.push({ id: pick.id, slot, reasons: reasonsFor(pick, slot, why) });
+      picks.push({ id: pick.id, slot, reasons: { ...reasonsFor(pick, slot, why), source } });
     }
   }
   return picks;
@@ -582,6 +615,8 @@ export function snapshotOf(model) {
     version: 1, computedAt: new Date(model.now).toISOString(), prior: round(model.prior), exploreShare: round(model.exploreShare),
     metrics: Object.fromEntries(Object.entries(model.metrics).map(([k, v]) => [k, v === null ? null : round(v)])),
     niches: model.niches.map((n) => ({ key: n.key, field: n.field, umbrella: n.umbrella, name: n.name, mean: round(n.mean) })),
+    stem: [...(model.stemFields ?? [])], stemChosen: model.stemChosen ?? false,
+    shares: Object.fromEntries(Object.entries(model.shares ?? {}).map(([k, v]) => [k, round(v)])),
     fields, subtopics: subtopics.slice(0, 400),
   };
 }

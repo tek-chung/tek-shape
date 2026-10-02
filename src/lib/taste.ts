@@ -4,9 +4,17 @@ export interface FieldTaste { field: string; mean: number; weight: number; targe
 export interface SubtopicTaste { key: string; field: string; name: string; mean: number; weight: number; paused: Pause | null }
 export interface Niche { key: string; field: string; umbrella: string; name: string; mean: number }
 export interface FeedMetrics { placed: number; hitRate: number | null; delightRate: number | null; explorations: number; explorationHitRate: number | null }
-export interface TasteSnapshot { computedAt: string; exploreShare: number; metrics: FeedMetrics; niches: Niche[]; fields: FieldTaste[]; subtopics: SubtopicTaste[] }
-export type Choice = "more" | "less" | "snooze";
+export interface TasteSnapshot {
+  computedAt: string; exploreShare: number; metrics: FeedMetrics; niches: Niche[]; fields: FieldTaste[]; subtopics: SubtopicTaste[];
+  /** The mixer's deep fields (chosen on the Map, or learnt) and this run's share of each candidate source. */
+  stem: string[]; stemChosen: boolean; shares: Record<string, number>;
+}
+/** "stem" marks a field as one of the reader's deep fields (three at most). */
+export type Choice = "more" | "less" | "snooze" | "stem";
 export interface Preference { scope: "field" | "subtopic"; key: string; choice: Choice; until: string | null }
+
+/** The mixer's candidate sources (scripts/content/mixer.mjs), in display order. */
+export const SOURCES = ["stem", "bar", "bridges", "trusted", "wild", "fresh"];
 
 /** Same rule as the engine's cleanSubtopic + subtopicKey, so steers land on the subtopics the engine sees. */
 export const subtopicKey = (field: string, name: string) =>
@@ -25,7 +33,7 @@ export function coerceTaste(value: unknown): { snapshot: TasteSnapshot | null; p
   if (!isObject(value)) return { snapshot: null, preferences: [] };
   const preferences = list<Preference>(value.preferences, (p) => {
     const scope: Preference["scope"] | null = p.scope === "field" || p.scope === "subtopic" ? p.scope : null;
-    const choice: Choice | null = p.choice === "more" || p.choice === "less" || p.choice === "snooze" ? p.choice : null;
+    const choice: Choice | null = p.choice === "more" || p.choice === "less" || p.choice === "snooze" || p.choice === "stem" ? p.choice : null;
     const key = text(p.key);
     return scope && choice && key ? { scope, key, choice, until: text(p.until, 40) } : null;
   });
@@ -42,6 +50,12 @@ export function coerceTaste(value: unknown): { snapshot: TasteSnapshot | null; p
       return field && mean !== null ? { field, mean, weight: num(f.weight) ?? 0, targetDifficulty: num(f.targetDifficulty) ?? 2.5, paused: pause(f.paused) } : null; }),
     subtopics: list(s.subtopics, (t) => { const key = text(t.key), field = text(t.field, 60), name = text(t.name, 100), mean = num(t.mean);
       return key && field && name && mean !== null ? { key, field, name, mean, weight: num(t.weight) ?? 0, paused: pause(t.paused) } : null; }),
+    stem: Array.isArray(s.stem) ? s.stem.slice(0, 3).flatMap((f) => { const field = text(f, 60); return field ? [field] : []; }) : [],
+    stemChosen: s.stemChosen === true,
+    shares: isObject(s.shares) ? Object.fromEntries(Object.entries(s.shares).flatMap(([k, v]): [string, number][] => {
+      const share = num(v);
+      return SOURCES.includes(k) && share !== null ? [[k, share]] : [];
+    })) : {},
   };
   return { snapshot, preferences };
 }

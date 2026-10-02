@@ -520,7 +520,9 @@ async function prepare() {
     reserve = "apply supabase/migrations/202610010001_feed_reserve.sql so the feed can refill itself";
   }
   // unreadBefore at or above the target means the feed was full: new posts wait in the reserve until needed.
-  return { added, unreadBefore: unread, targetUnread: target, reserve, slots, exploreShare: model.exploreShare, feed: model.metrics, nichesFound: model.niches.length, withVectors: vectors.size };
+  return { added, unreadBefore: unread, targetUnread: target, reserve, slots, exploreShare: model.exploreShare, feed: model.metrics, nichesFound: model.niches.length, withVectors: vectors.size,
+    // Numbers only (public logs): the mix of sources, not which fields form the stem.
+    mix: Object.fromEntries(Object.entries(model.shares).map(([k, v]) => [k, Math.round(v * 100) / 100])), stemFields: model.stemFields.size };
 }
 
 async function withRun(stage, work) {
@@ -787,6 +789,7 @@ async function main() {
       feed: { postsGraded: model.metrics.placed, readOrBetter: pct(model.metrics.hitRate), delighted: pct(model.metrics.delightRate),
         explorationsLanding: pct(model.metrics.explorationHitRate), exploreShare: pct(model.exploreShare) },
       niches: model.niches.map((n) => n.name),
+      stem: { fields: [...model.stemFields], chosen: model.stemChosen }, mix: model.shares,
       budget, runs,
     }, null, 2));
   } else {
