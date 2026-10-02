@@ -29,7 +29,9 @@ h1 em { color: #597057; font-weight: 400; }
 .view-nav { display: flex; border-bottom: 1px solid var(--line); gap: 24px; }
 .view-nav button { display: flex; align-items: center; gap: 8px; min-height: 49px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--muted); font-size: 13px; }
 .view-nav button[aria-current] { border-color: var(--accent); color: var(--accent); font-weight: 700; }
-@media (max-width: 380px) { .view-nav { gap: 10px; } .view-nav button { font-size: 12px; gap: 5px; } }
+@media (max-width: 380px) { .view-nav { gap: 10px; } .view-nav button { font-size: 12px; gap: 5px; } .view-nav button svg { display: none; } }
+.view-nav { overflow-x: auto; scrollbar-width: none; }
+.view-nav button { flex: none; }
 .count { border-radius: 5px; background: #e6ebdf; font-size: 10px; padding: 2px 5px; }
 .feed-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 27px 0 10px; }
 .feed-heading h2 { font-size: 13px; font-weight: 600; margin: 0; }
@@ -50,6 +52,10 @@ h1 em { color: #597057; font-weight: 400; }
 .topic-3 { background: #e2ebef; color: #3d626f; }
 .sample { font-size: 9px; letter-spacing: 1.2px; color: var(--muted); }
 .post-number { margin-left: auto; font: 12px Georgia, serif; color: #7d887d; }
+.why-button { border: 0; background: transparent; color: #536958; font-size: 10px; text-decoration: underline; text-underline-offset: 3px; min-height: 44px; min-width: 44px; padding: 0 4px; cursor: pointer; }
+.why { margin: -8px 0 18px; padding: 10px 13px; border-radius: 6px; background: #f3f5ef; }
+.why p { margin: 0; font-size: 12px; line-height: 1.6; color: #536958; }
+.why p + p { margin-top: 4px; }
 .post-card h2 { font-family: Georgia, 'Times New Roman', serif; font-size: 29px; font-weight: 400; line-height: 1.2; letter-spacing: -.7px; margin: 0 0 20px; text-wrap: balance; }
 .explanation p, .deeper p { font-size: 15px; line-height: 1.8; color: #48554e; margin: 0 0 15px; }
 .insight { border-left: 2px solid #8d9f75; background: #f1f4e9; margin: 23px 0 20px; padding: 15px 17px; border-radius: 0 6px 6px 0; }

@@ -9,12 +9,25 @@ const LIST_PAGE = 20;
 interface ListData { items: Post[]; atEnd: boolean; offline: boolean; loaded: boolean }
 const unloaded: ListData = { items: [], atEnd: false, offline: false, loaded: false };
 
+/** Everything published, as `post_json` shapes it, read straight from the table (the reader may select it). */
+const LATEST_COLUMNS = "id,topic,title,explanation,insight,deeper,source_label,source_url,published_at,status,content_type,subtopic,difficulty,concept_ids,event_date,sources,reviewed_at,article_date,umbrella,field,kind,first_block:body->0";
+type Row = Record<string, unknown>;
+const asPostJson = (r: Row) => ({
+  id: r.id, topic: r.topic, title: r.title, explanation: r.explanation, insight: r.insight ?? "", deeper: r.deeper ?? "",
+  source: r.source_url ? { label: r.source_label, url: r.source_url } : null, publishedAt: r.published_at, status: r.status,
+  contentType: r.content_type, subtopic: r.subtopic, difficulty: r.difficulty, conceptIds: r.concept_ids, eventDate: r.event_date,
+  sources: r.sources, reviewedAt: r.reviewed_at, articleDate: r.article_date, umbrella: r.umbrella, field: r.field, kind: r.kind,
+  hasBody: r.first_block !== null && r.first_block !== undefined,
+});
+
 /**
  * Saved ("bookmarked") or Read posts, newest first, fetched when the list is opened. These come from the
  * server rather than the feed cache, since read posts leave the feed. Offline, `fallback` (what the feed
- * already holds) is shown instead.
+ * already holds) is shown instead. "latest" is every published post, newest first, the same for any reader:
+ * no ranking, no personalisation (X's Following, Instagram's chronological feeds) — a baseline to compare
+ * the feed with, and a way round it.
  */
-export function useList(client: SupabaseClient, kind: "bookmarked" | "read", open: boolean, fallback: Post[]) {
+export function useList(client: SupabaseClient, kind: "bookmarked" | "read" | "latest", open: boolean, fallback: Post[]) {
   const [data, setData] = useState<ListData>(unloaded);
   const [loadingMore, setLoadingMore] = useState(false);
   const busy = useRef(false);
@@ -25,6 +38,12 @@ export function useList(client: SupabaseClient, kind: "bookmarked" | "read", ope
 
   // Fetching only: state is set by whoever awaits it, never synchronously inside an effect.
   const fetchPage = useCallback(async (offset: number) => {
+    if (kind === "latest") {
+      const { data: rows, error } = await client.from("post").select(LATEST_COLUMNS).eq("status", "published")
+        .order("published_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + LIST_PAGE - 1);
+      if (error) throw error;
+      return coercePosts((rows ?? []).map((row) => asPostJson(row as Row)));
+    }
     const { data: rows, error } = await client.rpc("saved_page", { p_kind: kind, p_offset: offset, p_limit: LIST_PAGE });
     if (error) throw error;
     return coercePosts(rows);

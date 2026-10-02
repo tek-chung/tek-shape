@@ -3,7 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowDown, Bookmark, CheckCheck, Layers2, LockKeyhole, Map as MapIcon, RotateCw, Sparkles, Sprout } from "lucide-react";
+import { ArrowDown, Bookmark, CheckCheck, Clock, Layers2, LockKeyhole, Map as MapIcon, RotateCw, Sparkles, Sprout } from "lucide-react";
+import { explainPlacement } from "@/lib/why";
+import { placeOf } from "@/lib/taxonomy";
 import { emptyPost, type PostPatch } from "@/lib/storage";
 import type { Post, ReadingPosition } from "@/types/post";
 import { useReading } from "@/hooks/useReading";
@@ -13,7 +15,7 @@ import { KnowledgeMap } from "./KnowledgeMap";
 import { ArticleReader } from "./ArticleReader";
 import { ratingLabels } from "./FeedbackBar";
 
-type View = "feed" | "library" | "read" | "map";
+type View = "feed" | "library" | "read" | "latest" | "map";
 
 /** Shorter than this is not a look at all; longer than this in one go is not attention. */
 const DWELL_MIN_MS = 200;
@@ -36,6 +38,16 @@ export function Feed({
   const readHere = posts.filter((post) => state.posts[post.id]?.readAt)
     .sort((a, b) => Date.parse(state.posts[b.id]?.readAt ?? "") - Date.parse(state.posts[a.id]?.readAt ?? ""));
   const readList = useList(client, "read", view === "read", readHere);
+  const latest = useList(client, "latest", view === "latest", []);
+  /** Why the engine placed a post: its stored reasons, read from the reader's own queue, in plain words. */
+  const why = useCallback(async (postId: string) => {
+    const { data, error: rpcError } = await client.from("feed_queue").select("reasons").eq("post_id", postId).maybeSingle();
+    if (rpcError) throw rpcError;
+    return explainPlacement((data as { reasons?: unknown } | null)?.reasons ?? null, (id) => {
+      const place = placeOf(id);
+      return place ? { field: place.field.label, area: place.umbrella.label } : undefined;
+    });
+  }, [client]);
   const [announcement, setAnnouncement] = useState("");
   // The saved article open over the feed, if any. It sits on the history stack, so the phone's back gesture
   // closes it rather than leaving the app.
@@ -244,7 +256,7 @@ export function Feed({
     );
 
   const savedCount = Object.values(state.posts).filter((post) => post.bookmarked).length;
-  const list = view === "library" ? library : view === "read" ? readList : null;
+  const list = view === "library" ? library : view === "read" ? readList : view === "latest" ? latest : null;
   const shown = list ? list.items : posts;
   const unread = posts.filter((post) => !state.posts[post.id]?.readAt).length;
   const status = syncing ? "Syncing…" : pending ? "Saved on this device" : "Saved to your account";
@@ -307,6 +319,10 @@ export function Feed({
             <CheckCheck size={17} aria-hidden="true" />
             Read
           </button>
+          <button type="button" aria-current={view === "latest" ? "page" : undefined} onClick={() => switchView("latest")}>
+            <Clock size={17} aria-hidden="true" />
+            Latest
+          </button>
           <button type="button" aria-current={view === "map" ? "page" : undefined} onClick={() => switchView("map")}>
             <MapIcon size={17} aria-hidden="true" />
             Map
@@ -314,8 +330,8 @@ export function Feed({
         </nav>
         {view === "map" ? <KnowledgeMap client={client} /> : <>
         <div className="feed-heading">
-          <h2>{view === "feed" ? "Explore something different" : view === "library" ? "Keep good ideas close" : "Already read"}</h2>
-          <span>{view === "feed" ? `${unread} unread` : view === "library" ? `${savedCount} saved` : "newest first"}</span>
+          <h2>{view === "feed" ? "Explore something different" : view === "library" ? "Keep good ideas close" : view === "latest" ? "Everything, newest first" : "Already read"}</h2>
+          <span>{view === "feed" ? `${unread} unread` : view === "library" ? `${savedCount} saved` : view === "latest" ? "not personalised" : "newest first"}</span>
         </div>
         <p className="sample-note">
           Posts marked SAMPLE are illustrative, not verified editorial content. Published posts include their sources.
@@ -362,6 +378,7 @@ export function Feed({
               disabled={!ready}
               onChange={(patch) => updatePost(post.id, patch)}
               onRead={() => openReader(post)}
+              onWhy={view === "latest" ? undefined : () => why(post.id)}
             />
           ))}
         </div>

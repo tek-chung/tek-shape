@@ -543,6 +543,21 @@ Expected: with ~1,000 useful posts waiting, runs draft the floor (2) plus news, 
 Watch `demand` and `skippedAsKnown` in the first runs; if the feed thins, raise `CONTENT_INVENTORY_DAYS` or
 `CONTENT_DRAFT_MIN`. Tests: content 134 (demand 4, screen 1).
 
+## 5w. T-Mixer phase 5a: Why this post? and Latest (5 Oct 2026, Claude)
+
+Owner chose these two first (Dear T, Briefing ring and Echo cards later; the last two need SPEC changes).
+No migration: both read tables the reader may already select.
+
+- **Why this post?** A "Why?" text button in each card's meta row (feed, Library, Read; not Latest) opens a
+  note in place, fetched on first tap from the reader's own `feed_queue.reasons` and worded by
+  `src/lib/why.ts` (`explainPlacement`, untrusted input, labels passed in). Rows placed before 202610020001 say
+  so. The five controls are unchanged; tapping Why? does not count as reading.
+- **Latest** tab: every published post, newest first, the same for any reader (`useList("latest")`, straight
+  from `post` with `post_json`'s shape, saved-article flag from `body->0`). Controls work as anywhere else.
+- Nav: five tabs; at ≤ 380 px the tab icons hide, and the bar scrolls sideways if still too narrow.
+- Tests: client 8 (`explainPlacement`). tsc and ESLint on changed files pass. Not run: build, Playwright, a
+  look on the phone at 320–390 px.
+
 Next T-Mixer phases (agreed plan, not started):
 4 demand-led drafting (headline embeddings), 5 surfaces (Why this?, Your T, Dear T, Latest, Briefing ring,
 Atlas, Tracks). Earlier list, for reference: 1b concept graph (canonical concepts, `assumes` in the draft

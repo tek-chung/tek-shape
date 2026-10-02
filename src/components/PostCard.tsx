@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { placeOf } from "@/lib/taxonomy";
 import { ArrowUpRight, BookText } from "lucide-react";
 import type { Post, PostState } from "@/types/post";
@@ -14,9 +15,19 @@ interface Props {
   onChange: (patch: PostPatch) => void;
   /** Open the article saved from the feed, when there is one. */
   onRead?: () => void;
+  /** Feed only: fetch why the engine placed this post, as plain sentences. */
+  onWhy?: () => Promise<string[]>;
 }
 
-export function PostCard({ post, index, state, disabled, onChange, onRead }: Props) {
+export function PostCard({ post, index, state, disabled, onChange, onRead, onWhy }: Props) {
+  // "Why this post?" opens in place, like the deeper explanation, and is fetched only when asked for.
+  const [why, setWhy] = useState<string[] | null>(null);
+  const [whyOpen, setWhyOpen] = useState(false);
+  function toggleWhy() {
+    if (whyOpen) { setWhyOpen(false); return; }
+    setWhyOpen(true);
+    if (!why && onWhy) onWhy().then(setWhy, () => setWhy(["The reasons could not be loaded. Check your connection and try again."]));
+  }
   const place = placeOf(post.field);
   const excerpt = post.kind === "excerpt";
   // Always show where a post came from. Sample posts carry `source`; generated posts carry `sources`.
@@ -26,7 +37,10 @@ export function PostCard({ post, index, state, disabled, onChange, onRead }: Pro
   const label = post.status !== "published" ? "SAMPLE" : excerpt ? "EXCERPT" : post.contentType === "news" ? "NEWS" : "EVERGREEN";
   return <article id={post.id} data-post-id={post.id} aria-labelledby={`title-${post.id}`} className="post-card" tabIndex={-1}>
     <div className="post-body">
-      <div className="post-meta"><span className={`topic topic-${index % 4}`} title={place ? `${place.umbrella.label} › ${place.field.label}` : post.topic}>{place && place.field.id !== "general" ? place.field.label : post.topic}{post.subtopic && place?.field.id !== "general" ? <span className="subtopic"> · {post.subtopic}</span> : null}</span><span className="sample">{label}</span><span className="post-number">{String(index + 1).padStart(2, "0")}</span></div>
+      <div className="post-meta"><span className={`topic topic-${index % 4}`} title={place ? `${place.umbrella.label} › ${place.field.label}` : post.topic}>{place && place.field.id !== "general" ? place.field.label : post.topic}{post.subtopic && place?.field.id !== "general" ? <span className="subtopic"> · {post.subtopic}</span> : null}</span><span className="sample">{label}</span>{onWhy && <button type="button" className="why-button" aria-expanded={whyOpen} aria-controls={`why-${post.id}`} onClick={toggleWhy}>Why?<span className="sr-only"> Why this post is in your feed</span></button>}<span className="post-number">{String(index + 1).padStart(2, "0")}</span></div>
+      {whyOpen && <div id={`why-${post.id}`} className="why" role="note">
+        {why ? why.map((line) => <p key={line}>{line}</p>) : <p>Loading…</p>}
+      </div>}
       <h2 id={`title-${post.id}`}>{post.title}</h2>
       {excerpt
         // The publisher's own words, shown as they wrote them. The class lets the feed count it as read.

@@ -90,3 +90,17 @@ test("reading time adds up in the outbox, is capped per report, and can be strip
   const outbox = coerceOutbox({ posts: { a: { dwell: 1500.4 }, b: { dwell: -3 }, c: { dwell: "9" }, d: { dwell: 9e9, seen: true } }, progress: null });
   assert.deepEqual(outbox.posts, { a: { dwell: 1500 }, d: { seen: true, dwell: MAX_DWELL_MS } });
 });
+
+test("why a post was placed, in plain words, from whatever the engine stored", async () => {
+  const { explainPlacement } = await import("../../src/lib/why.ts");
+  const names = (id) => (id === "neuroscience" ? { field: "Neuroscience & the brain", area: "Life sciences" } : undefined);
+  assert.deepEqual(explainPlacement(null), ["Placed before the feed recorded its reasons."]);
+  assert.deepEqual(explainPlacement("junk"), ["Placed before the feed recorded its reasons."]);
+  assert.match(explainPlacement({ why: "next-step", field: "neuroscience" }, names)[0], /next step in Neuroscience & the brain/);
+  assert.match(explainPlacement({ why: "breadth", field: "neuroscience" }, names)[0], /Life sciences has not appeared/);
+  assert.match(explainPlacement({ why: "bridge", field: "x" }, names)[0], /shares an idea you enjoyed/);
+  const many = explainPlacement({ why: "stem", field: "neuroscience", steer: "stem", reteach: true, fatigue: 0.4, difficulty: 4, target: 2.5 }, names);
+  assert.equal(many.length, 5, many.join(" | "));
+  assert.match(many.at(-1), /above your usual level/);
+  assert.match(explainPlacement({ why: "something-new", field: "nope" }, names)[0], /Close to what you enjoy in this field/);
+});
