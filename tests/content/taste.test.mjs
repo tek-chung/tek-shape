@@ -350,3 +350,19 @@ test("depth ladders: Harder makes an idea familiar, so it is not retaught, and p
   if (order.includes(again.id)) assert.equal(why[again.id].reteach, true, "and is marked as reteaching");
   assert.equal(why[plain.id].reteach, undefined);
 });
+
+test("the briefing: today's unread news, best first, one post per story, two per publisher at most", async () => {
+  const { chooseBriefing } = await import("../../scripts/content/taste.mjs");
+  const { normalise } = await import("../../scripts/content/understand.mjs");
+  const unit = (i, j = null) => { const v = new Float32Array(384); v[i] = 1; if (j !== null) v[j] = 0.2; return normalise(v); };
+  const model = buildTaste({ posts: [], states: [], now });
+  const news = (hoursAgo, publisher, extra = {}) => post("geopolitics-diplomacy", `Story ${serial}`, { content_type: "news", article_date: new Date(now - hoursAgo * 3_600_000).toISOString(), sources: [{ publisher }], ...extra });
+  const a = news(2, "SCMP"), b = news(3, "Guardian"), sameStory = news(4, "Al Jazeera"), old = news(50, "CNN"), c = news(5, "SCMP"), d = news(6, "SCMP"), read = news(1, "CNN");
+  const evergreen = post("ethics", "Virtue");
+  const vectors = new Map([[a.id, unit(1)], [b.id, unit(2)], [sameStory.id, unit(1, 3)], [c.id, unit(4)], [d.id, unit(5)]]);
+  const ids = chooseBriefing({ model, candidates: [a, b, sameStory, old, c, d, read, evergreen], excluded: new Set([read.id]), vectors, now });
+  assert.ok(!ids.includes(sameStory.id), "the same story from another outlet is left out");
+  assert.ok(!ids.includes(old.id) && !ids.includes(read.id) && !ids.includes(evergreen.id), "only fresh, unread news");
+  assert.ok(ids.filter((id) => [a.id, c.id, d.id].includes(id)).length <= 2, "two per publisher at most");
+  assert.ok(ids.length >= 3 && ids.length <= 5, ids.join());
+});

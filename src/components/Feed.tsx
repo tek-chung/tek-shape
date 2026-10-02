@@ -13,6 +13,8 @@ import { useList } from "@/hooks/useList";
 import { PostCard } from "./PostCard";
 import { KnowledgeMap } from "./KnowledgeMap";
 import { ArticleReader } from "./ArticleReader";
+import { BriefingRing, EchoCard, StoryViewer } from "./Extras";
+import { useExtras } from "@/hooks/useExtras";
 import { ratingLabels } from "./FeedbackBar";
 
 type View = "feed" | "library" | "read" | "latest" | "map";
@@ -20,6 +22,8 @@ type View = "feed" | "library" | "read" | "latest" | "map";
 /** Shorter than this is not a look at all; longer than this in one go is not attention. */
 const DWELL_MIN_MS = 200;
 const DWELL_VISIT_MAX_MS = 120_000;
+/** An Echo card follows every this many posts in the feed, while any are due (at most three a sitting). */
+const ECHO_EVERY = 8;
 
 export function Feed({
   client,
@@ -39,6 +43,23 @@ export function Feed({
     .sort((a, b) => Date.parse(state.posts[b.id]?.readAt ?? "") - Date.parse(state.posts[a.id]?.readAt ?? ""));
   const readList = useList(client, "read", view === "read", readHere);
   const latest = useList(client, "latest", view === "latest", []);
+  const extras = useExtras(client, ready, sitting);
+  // The briefing story open over the feed, if any; like the reader, it sits on the history stack.
+  const [story, setStory] = useState<number | null>(null);
+  const closeStory = useCallback(() => {
+    if (history.state?.story !== undefined) history.back();
+    else setStory(null);
+  }, []);
+  useEffect(() => {
+    if (story === null) return;
+    const pop = () => setStory(null);
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, [story]);
+  function openStory(index: number) {
+    history.pushState({ ...history.state, story: index }, "");
+    setStory(index);
+  }
   /** Why the engine placed a post: its stored reasons, read from the reader's own queue, in plain words. */
   const why = useCallback(async (postId: string) => {
     const { data, error: rpcError } = await client.from("feed_queue").select("reasons").eq("post_id", postId).maybeSingle();
@@ -360,6 +381,7 @@ export function Feed({
         <p className="sr-only" role="status">
           {announcement}
         </p>
+        {view === "feed" && <BriefingRing posts={extras.briefing} states={state.posts} onOpen={openStory} />}
         {view === "feed" && fresh && (
           <div className="fresh-note" role="status">
             <Sparkles size={15} aria-hidden="true" />
@@ -369,8 +391,8 @@ export function Feed({
           </div>
         )}
         <div className="posts">
-          {shown.map((post, index) => (
-            <PostCard
+          {shown.flatMap((post, index) => {
+            const card = <PostCard
               key={post.id}
               post={post}
               index={index}
@@ -379,8 +401,12 @@ export function Feed({
               onChange={(patch) => updatePost(post.id, patch)}
               onRead={() => openReader(post)}
               onWhy={view === "latest" ? undefined : () => why(post.id)}
-            />
-          ))}
+            />;
+            // In the feed, an Echo card after every eighth post while any are due.
+            const echo = view === "feed" && (index + 1) % ECHO_EVERY === 0 ? extras.echoes[(index + 1) / ECHO_EVERY - 1] : undefined;
+            return echo ? [card, <EchoCard key={`echo-${echo.post.id}`} echo={echo}
+              onAnswer={(remembered) => extras.answer(echo.post.id, remembered)} onDone={() => extras.dismiss(echo.post.id)} />] : [card];
+          })}
         </div>
         {list?.offline && (
           <p role="status" className="storage-warning">
@@ -438,6 +464,7 @@ export function Feed({
         )}
         </>}
         {reading && <ArticleReader client={client} post={reading} onClose={closeReader} />}
+        {story !== null && <StoryViewer posts={extras.briefing} start={story} states={state.posts} onChange={updatePost} onClose={closeStory} />}
         <footer>
           Your reading, kept together.
           <br />

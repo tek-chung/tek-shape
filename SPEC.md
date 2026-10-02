@@ -22,6 +22,12 @@ Main feed:
 - Keep the user's place in the feed when they leave and return. Avoid reshuffling previously assigned posts.
 - The app should feel calm, readable, modern and minimal rather than gamified or engagement-maximising.
 
+Around the feed (added 6 October 2026, see §9):
+- Briefing ring: today's news as a row of rings above the feed, one per story, chosen by the engine and gone after a day. Opening a ring shows its stories one after another as full posts, with the five controls. Posts in the ring are kept out of the main feed while they are in it.
+- Echo cards: now and then, a post the reader valued (saved, rated More or Harder, or its deeper explanation opened) comes back with its key insight hidden until tapped, after about 2, 7, 21 and 60 days. The reader answers "I remembered" or "I'd forgotten"; remembering moves it to the next interval, forgetting brings it back in two days. No score, streak or tally is ever shown.
+- Why this post?: a small "Why?" link in each post's top row explains in plain words why the engine placed it.
+- Latest: a tab listing every published post, newest first, with no ranking or personalisation.
+
 Each post contains:
 - Stable unique ID.
 - Topic and subtopic.
@@ -34,12 +40,14 @@ Each post contains:
 - Difficulty/depth and canonical concepts taught.
 - Publication/event date for time-sensitive material where relevant.
 
-Immediately BELOW EACH post, display exactly five compact icon-only controls in this order:
+Immediately BELOW EACH knowledge post (in the feed, the Briefing ring, the Library, Read and Latest), display exactly five compact icon-only controls in this order:
 1. Thumbs up: more content like this at the SAME difficulty level.
 2. Thumbs down: this post is not interesting. Do not interpret this as a permanent ban on its entire discipline.
 3. Double check/tick: keep this topic, but go MORE ADVANCED; the current concept was too familiar.
 4. Bookmark: save independently of the rating.
 5. Book-open: expand/collapse the deeper explanation IN PLACE, within the post and above that post's controls. It must not open a new page or submit a new chat request.
+
+Echo cards are not new posts and carry their own two answers instead of these controls. The "Why?" link sits in the post's top row and is not one of the controls.
 
 The three ratings are mutually exclusive per post; clicking the selected rating again may clear it. All controls need accessible names, visible selected states and adequate touch targets. Feedback and bookmarks must persist across sessions. Do not require textual labels next to the icons.
 
@@ -57,7 +65,7 @@ The feed must develop broad intellectual foundations, not become a narrow stream
 
 Aim for genuinely different disciplines and subdisciplines across adjacent posts and editions. Prevent near-duplicates at the level of the underlying idea, not merely identical titles. Revisiting a discipline is useful when teaching a genuinely new concept or moving to greater depth.
 
-The content mix should include BOTH current news and timeless knowledge. Do not enforce a rigid 50/50 ratio if that reduces breadth, accuracy or source quality. News should provide useful context and teach durable ideas, not just recount headlines.
+The content mix should include BOTH current news and timeless knowledge. Do not enforce a rigid 50/50 ratio if that reduces breadth, accuracy or source quality. News should provide useful context and teach durable ideas, not just recount headlines. Today's news is shown mainly in the Briefing ring; in the main feed it is limited to about one post in twenty.
 
 Posts should be accessible to an intelligent adult without assuming specialist training, but not condescending or repeatedly introductory. Each should have a meaningful takeaway and an optional deeper layer.
 
@@ -182,3 +190,11 @@ Work incrementally. Inspect existing files before changing them. Do not overwrit
 Prefer small, reviewable changes and meaningful commits. Run relevant checks and report failures honestly. Do not claim tests passed unless they ran. Do not commit, push, deploy, connect accounts, purchase services or introduce paid dependencies without asking me first.
 
 START NOW WITH PHASE 1 ONLY. After completing it, provide exact local run instructions, a concise account of the files changed, test results, known limitations and the recommended next step.
+
+9. AMENDMENTS
+
+6 October 2026 — the recommender redesign (T-Mixer; see HANDOFF.md §5q–5x and docs/content-engine.md):
+- The feed is ranked from several candidate sources with shares: the stem (one to three deep fields, chosen on the Map with "Stem" or learnt from reading), breadth across areas read least, bridges, trusted sources, exploration and news. Breadth and exploration never fall below a floor.
+- Reading time (how long each post is in view), placement reasons, post meanings (embeddings from a small local model, never sent to an API), idea clusters, canonical concepts and each post's prerequisites are stored to rank by idea rather than by label: the same idea in other words is not shown twice, and Harder moves the reader up a specific idea.
+- Drafting is demand-led: each run drafts only what the feed will need.
+- Briefing ring, Echo cards, Why this post? and Latest were added to §2. Echo cards replace the five controls with their own two answers; all other posts keep the five controls unchanged.

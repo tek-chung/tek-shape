@@ -558,7 +558,31 @@ No migration: both read tables the reader may already select.
 - Tests: client 8 (`explainPlacement`). tsc and ESLint on changed files pass. Not run: build, Playwright, a
   look on the phone at 320–390 px.
 
-Next T-Mixer phases (agreed plan, not started):
+## 5x. T-Mixer phase 5b: SPEC amended, Briefing ring, Echo cards (6 Oct 2026, Claude)
+
+Owner approved the SPEC changes. SPEC §2 gains "Around the feed" (Briefing ring, Echo cards, Why?, Latest) and
+scopes the five controls to knowledge posts (Echo cards have their own two answers); §3 puts news mainly in the
+ring; new §9 Amendments summarises the redesign. SPEC.md is now committed with LF endings (the working copy's
+CRLF churn is gone).
+
+Migration `202610060001_briefing_echoes.sql` (additive): `briefing` (engine-written, reader-readable),
+`echo_answer`, `echo_schedule(uid)` (not callable by the reader), `echo_due(limit)` and `echo_answer(post,
+remembered)` (security definer, caller's rows only; "Not due" refuses double taps).
+
+- Engine: `chooseBriefing` (taste.mjs) — fresh (< 36 h) unread news, not queued or resting, best expected value,
+  one per story (cosine ≥ 0.75 to a chosen one is left out), two per publisher, five at most. `prepare` saves
+  it (`briefing` count in its output), keeps those posts out of feed and reserve, and no longer offers posts
+  already read anywhere (ring, Latest). `planDemand` stops counting read posts as stock.
+- App: `useExtras` (ring and echoes per sitting; silent offline or before the migration), `Extras.tsx`
+  (`BriefingRing`, `StoryViewer` overlay on the history stack — opening marks seen, 5 s marks read —
+  and `EchoCard`, one after every eighth feed post, at most three a sitting). `lib/postRows.ts` shares the
+  table-to-post_json mapping with Latest.
+- Tests: SQL 70 (echo schedule, refusals, RLS), content 135 (`chooseBriefing`), client 8. tsc and ESLint on
+  changed files pass. Not run: build, Playwright, the ring and viewer on a phone.
+
+Next T-Mixer phases (agreed plan, not started): Dear T (natural-language steering, owner deferred), Atlas,
+Tracks; tuning from the report card once a week or two of mixer-1 readings exist.
+Older list, for reference:
 4 demand-led drafting (headline embeddings), 5 surfaces (Why this?, Your T, Dear T, Latest, Briefing ring,
 Atlas, Tracks). Earlier list, for reference: 1b concept graph (canonical concepts, `assumes` in the draft
 schema, depth ladders), 3 mixer with seven sources, 4 demand-led drafting (headline embeddings), 5 surfaces.

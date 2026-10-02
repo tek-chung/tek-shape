@@ -41,8 +41,9 @@ export function planDemand({ posts, states, queued, model, now = Date.now(), yie
   const target = Math.max(DEMAND.minInventory, Math.round(readsPerDay * inventoryDays));
 
   const useful = [];
+  const read = new Set(states.filter((s) => s.read_at).map((s) => s.post_id));
   for (const post of posts) {
-    if (queued.has(post.id) || post.status !== "published" || post.verification_status !== "source_checked") continue;
+    if (queued.has(post.id) || read.has(post.id) || post.status !== "published" || post.verification_status !== "source_checked") continue;
     if (post.content_type === "news" && !(now - Date.parse(post.article_date) < 14 * DAY)) continue;
     const e = model.estimate(post.field, post.subtopic, model.clusterOf?.(post.id) ?? null);
     if (model.pauseOf(e.place.field, e.sKey) || e.mean < DEMAND.usefulMean) continue;

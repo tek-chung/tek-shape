@@ -4,7 +4,7 @@ import nextEnv from "@next/env";
 import { CLASSIFY_RULES, DRAFT_INSTRUCTION, discover, draftCandidates, feedArticles, modelSource, publisherOf, settleDraft, validateSources } from "./engine.mjs";
 import { extractArticle, fetchSource, pageExcerpt } from "./sources.mjs";
 import { ModelChainError, classifySchema, draftSchema, generateJSON, liveModels, modelConfig, triageSchema } from "./model.mjs";
-import { RANKER, buildTaste, seededRandom, judgeTopic, planSources, promptSummary, rankQueue, snapshotOf, sourceOf } from "./taste.mjs";
+import { RANKER, buildTaste, chooseBriefing, seededRandom, judgeTopic, planSources, promptSummary, rankQueue, snapshotOf, sourceOf } from "./taste.mjs";
 import { cleanSubtopic, placeOf } from "./taxonomy.mjs";
 import { planDemand, withDemand } from "./demand.mjs";
 import { DIMS, EMBED_MODEL, UNDERSTANDING, clusterCount, conceptText, cosine, foldConcepts, headlineText, clustersDue, embedder, kmeans, labelCluster, nearestCentroid, neighbourSpread, pack, postText, unpack } from "./understand.mjs";
@@ -121,6 +121,19 @@ async function loadAliases() {
   } catch (error) {
     if (!missingMigration(error)) throw error;
     return new Map();
+  }
+}
+
+/** Replace the reader's Briefing ring. Before migration 202610060001 there is no ring: a hint instead. */
+async function saveBriefing(userId, ids) {
+  try {
+    await result(db.from("briefing").delete().eq("user_id", userId));
+    const at = new Date().toISOString();
+    if (ids.length) await result(db.from("briefing").insert(ids.map((post_id, i) => ({ user_id: userId, post_id, rank: i + 1, prepared_at: at }))));
+    return ids.length;
+  } catch (error) {
+    if (!missingMigration(error)) throw error;
+    return "apply supabase/migrations/202610060001_briefing_echoes.sql for the Briefing ring";
   }
 }
 
@@ -524,7 +537,14 @@ async function prepare() {
   const read = new Set(states.filter((s) => s.read_at).map((s) => s.post_id));
   const unread = assigned.filter((p) => !read.has(p.id)).length;
   const target = setting("CONTENT_QUEUE_TARGET", 24, { min: 1, max: 500 });
-  const picks = rankQueue({ model, candidates: posts, assigned, need: Math.max(0, target - unread), now: model.now, vectors });
+  // Posts read anywhere (the Briefing ring, Latest) are not offered again; today's briefing stays out of the
+  // feed while it is in the ring, so news is not met twice.
+  const queuedIds = new Set(queue.map((q) => q.post_id));
+  const briefing = chooseBriefing({ model, candidates: posts, excluded: new Set([...read, ...queuedIds]), vectors, now: model.now });
+  const inBriefing = new Set(briefing);
+  const candidates = posts.filter((p) => !read.has(p.id) && !inBriefing.has(p.id));
+  const briefed = await saveBriefing(reader.user_id, briefing);
+  const picks = rankQueue({ model, candidates, assigned, need: Math.max(0, target - unread), now: model.now, vectors });
   const added = picks.length ? await result(db.rpc("append_feed", { p_user_id: reader.user_id, p_ids: picks.map((p) => p.id) })) : 0;
   // Remember why each post was placed, so the feed can grade its own explorations and, from 202610020001,
   // explain itself and compare rankers. Without that migration only the slot is kept.
@@ -546,7 +566,7 @@ async function prepare() {
   const size = setting("CONTENT_RESERVE", 60, { min: 0, max: 200 });
   let reserve;
   try {
-    const next = size ? rankQueue({ model, candidates: posts, assigned: [...assigned, ...picks.map((p) => byId.get(p.id))], need: size, now: model.now, vectors }) : [];
+    const next = size ? rankQueue({ model, candidates, assigned: [...assigned, ...picks.map((p) => byId.get(p.id))], need: size, now: model.now, vectors }) : [];
     await result(db.from("feed_reserve").delete().eq("user_id", reader.user_id));
     const rows = next.map((p, i) => ({ user_id: reader.user_id, post_id: p.id, rank: i + 1, slot: p.slot, ...(explained ? { reasons: p.reasons, ranker: RANKER } : {}) }));
     if (rows.length) {
@@ -562,7 +582,7 @@ async function prepare() {
     reserve = "apply supabase/migrations/202610010001_feed_reserve.sql so the feed can refill itself";
   }
   // unreadBefore at or above the target means the feed was full: new posts wait in the reserve until needed.
-  return { added, unreadBefore: unread, targetUnread: target, reserve, slots, exploreShare: model.exploreShare, feed: model.metrics, nichesFound: model.niches.length, withVectors: vectors.size,
+  return { added, unreadBefore: unread, targetUnread: target, reserve, slots, exploreShare: model.exploreShare, feed: model.metrics, nichesFound: model.niches.length, withVectors: vectors.size, briefing: briefed,
     // Numbers only (public logs): the mix of sources, not which fields form the stem.
     mix: Object.fromEntries(Object.entries(model.shares).map(([k, v]) => [k, Math.round(v * 100) / 100])), stemFields: model.stemFields.size };
 }

@@ -3,22 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Post } from "@/types/post";
 import { appendPosts, coercePosts } from "@/lib/storage";
+import { POST_COLUMNS, asPostJson, type Row } from "@/lib/postRows";
 
 const LIST_PAGE = 20;
 
 interface ListData { items: Post[]; atEnd: boolean; offline: boolean; loaded: boolean }
 const unloaded: ListData = { items: [], atEnd: false, offline: false, loaded: false };
-
-/** Everything published, as `post_json` shapes it, read straight from the table (the reader may select it). */
-const LATEST_COLUMNS = "id,topic,title,explanation,insight,deeper,source_label,source_url,published_at,status,content_type,subtopic,difficulty,concept_ids,event_date,sources,reviewed_at,article_date,umbrella,field,kind,first_block:body->0";
-type Row = Record<string, unknown>;
-const asPostJson = (r: Row) => ({
-  id: r.id, topic: r.topic, title: r.title, explanation: r.explanation, insight: r.insight ?? "", deeper: r.deeper ?? "",
-  source: r.source_url ? { label: r.source_label, url: r.source_url } : null, publishedAt: r.published_at, status: r.status,
-  contentType: r.content_type, subtopic: r.subtopic, difficulty: r.difficulty, conceptIds: r.concept_ids, eventDate: r.event_date,
-  sources: r.sources, reviewedAt: r.reviewed_at, articleDate: r.article_date, umbrella: r.umbrella, field: r.field, kind: r.kind,
-  hasBody: r.first_block !== null && r.first_block !== undefined,
-});
 
 /**
  * Saved ("bookmarked") or Read posts, newest first, fetched when the list is opened. These come from the
@@ -39,7 +29,7 @@ export function useList(client: SupabaseClient, kind: "bookmarked" | "read" | "l
   // Fetching only: state is set by whoever awaits it, never synchronously inside an effect.
   const fetchPage = useCallback(async (offset: number) => {
     if (kind === "latest") {
-      const { data: rows, error } = await client.from("post").select(LATEST_COLUMNS).eq("status", "published")
+      const { data: rows, error } = await client.from("post").select(POST_COLUMNS).eq("status", "published")
         .order("published_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + LIST_PAGE - 1);
       if (error) throw error;
       return coercePosts((rows ?? []).map((row) => asPostJson(row as Row)));

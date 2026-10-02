@@ -373,6 +373,33 @@ function expected(model, post, known) {
   return { value, e, choice, novelty, fit, ladder, reteach };
 }
 
+/**
+ * The Briefing ring: today's news, at most `limit` posts, one per story. Fresh (article within 36 hours),
+ * unread, not resting, not already in the feed; best expected enjoyment first; a post too close to one already
+ * chosen (the same story from another outlet, by the understanding model) is left out, and no publisher has
+ * more than two. Returns post ids in ring order.
+ */
+export function chooseBriefing({ model, candidates, excluded = new Set(), vectors = new Map(), now = Date.now(), limit = 5 }) {
+  const fresh = [];
+  for (const post of candidates) {
+    if (excluded.has(post.id) || post.status !== "published" || post.verification_status !== "source_checked" || post.content_type !== "news") continue;
+    const age = now - Date.parse(post.article_date ?? "");
+    if (!(age >= 0 && age < 36 * 3_600_000)) continue;
+    const e = model.estimate(post.field, post.subtopic, model.clusterOf?.(post.id) ?? null);
+    if (model.pauseOf(e.place.field, e.sKey)) continue;
+    fresh.push({ post, value: expected(model, post, new Set()).value, publisher: publisherOfPost(post), vec: vectors.get(post.id) ?? null });
+  }
+  fresh.sort((a, b) => b.value - a.value || a.post.id.localeCompare(b.post.id));
+  const chosen = [];
+  for (const item of fresh) {
+    if (chosen.length >= limit) break;
+    if (chosen.filter((c) => c.publisher === item.publisher).length >= 2) continue;
+    if (item.vec && chosen.some((c) => c.vec && cosine(c.vec, item.vec) >= UNDERSTANDING.near)) continue;
+    chosen.push(item);
+  }
+  return chosen.map((c) => c.post.id);
+}
+
 /** Names the ranker that placed a post, stored with each placement so rankers can be compared later. */
 export const RANKER = "mixer-1";
 const r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
