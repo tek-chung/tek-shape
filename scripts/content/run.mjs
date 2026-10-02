@@ -6,7 +6,8 @@ import { extractArticle, fetchSource, pageExcerpt } from "./sources.mjs";
 import { ModelChainError, classifySchema, draftSchema, generateJSON, liveModels, modelConfig, triageSchema } from "./model.mjs";
 import { RANKER, buildTaste, seededRandom, judgeTopic, planSources, promptSummary, rankQueue, snapshotOf, sourceOf } from "./taste.mjs";
 import { cleanSubtopic, placeOf } from "./taxonomy.mjs";
-import { DIMS, EMBED_MODEL, clusterCount, conceptText, foldConcepts, clustersDue, embedder, kmeans, labelCluster, nearestCentroid, neighbourSpread, pack, postText, unpack } from "./understand.mjs";
+import { planDemand, withDemand } from "./demand.mjs";
+import { DIMS, EMBED_MODEL, UNDERSTANDING, clusterCount, conceptText, cosine, foldConcepts, headlineText, clustersDue, embedder, kmeans, labelCluster, nearestCentroid, neighbourSpread, pack, postText, unpack } from "./understand.mjs";
 import { checkDraft, checkExcerpt, checkReview, excerptFound, recentConcepts } from "./editorial.mjs";
 
 nextEnv.loadEnvConfig(process.cwd());
@@ -331,12 +332,25 @@ async function candidateSummary() {
 }
 
 async function draft(config) {
-  const [groups, posts, states, aliases] = await Promise.all([loadSources(), rankingPosts(), all("user_post_state"), loadAliases()]);
+  const [groups, posts, states, aliases, { vectors, clusters }, summary] = await Promise.all([
+    loadSources(), rankingPosts(), all("user_post_state"), loadAliases(), loadUnderstanding(), candidateSummary()]);
   // A held draft's article is retried once it is older than this, since the checks or models may have
   // improved since; otherwise one bad draft would lock that article out for good. 0 retries every run.
   const retryAfter = setting("CONTENT_RETRY_HELD_HOURS", 24, { min: 0, max: 720 }) * 3_600_000;
   const cutoff = Date.now() - retryAfter;
-  const { model } = await loadTaste(posts, states, new Map(), aliases);
+  const { model, queue } = await loadTaste(posts, states, clusters, aliases);
+  // Demand-led drafting: how many drafts this run should make, and where the gaps are (demand.mjs).
+  // CONTENT_DEMAND=off drafts up to CONTENT_DRAFT_LIMIT regardless, as before.
+  const limit = setting("CONTENT_DRAFT_LIMIT", 8, { min: 1, max: 50 });
+  const counts = summary.byStatus ?? {};
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const demand = /^off$/i.test(process.env.CONTENT_DEMAND ?? "") ? null : planDemand({
+    posts, states, queued: new Set(queue.map((q) => q.post_id)), model, now: Date.now(), limit,
+    inventoryDays: setting("CONTENT_INVENTORY_DAYS", 4, { min: 1, max: 30 }), minDrafts: setting("CONTENT_DRAFT_MIN", 2, { min: 0, max: 50 }),
+    yieldRate: total >= 30 ? ((counts.checked ?? 0) + (counts.published ?? 0)) / total : null,
+  });
+  // Headlines whose idea the feed already has are not drafted (needs the local model; skipped if unavailable).
+  const screen = headlineScreen(vectors);
   // When each source was last drafted, and which areas its posts fall in: for fair, gap-filling turns.
   const { lastDrafted, known, lookupKnown } = await draftedSoFar(cutoff);
   const postsByPublisher = new Map();
@@ -349,10 +363,10 @@ async function draft(config) {
   }));
   // Attempts since the last save belong to that candidate: the engine drafts, reviews, then saves, in order.
   const trace = [];
-  return draftCandidates({
+  const metrics = await draftCandidates({
     // Canonical spellings, so the drafting model reuses one tag per idea.
     groups, concepts: [...new Set(recentConcepts(posts).map((c) => aliases.get(c) ?? c))], preferences: promptSummary(model),
-    limit: setting("CONTENT_DRAFT_LIMIT", 8, { min: 1, max: 50 }),
+    limit: demand ? demand.drafts : limit, screen,
     sourceChars: setting("CONTENT_SOURCE_CHARS", 10000, { min: 2000, max: 24000 }),
     known, lookupKnown,
     checks: checksMode(),
@@ -366,7 +380,9 @@ async function draft(config) {
         const verdicts = new Map();
         for (const item of Array.isArray(json?.items) ? json.items : []) {
           const entry = Number.isInteger(item?.index) ? entries[item.index] : undefined;
-          if (entry) verdicts.set(entry.url, judgeTopic(model, { field: item.field, subtopic: item.subtopic, publisher: entry.publisher }));
+          // A headline published in the last three days may be news, which the demand may be short of.
+          const recent = entry && Date.now() - Date.parse(entry.published ?? "") < 3 * 86_400_000;
+          if (entry) verdicts.set(entry.url, withDemand(judgeTopic(model, { field: item.field, subtopic: item.subtopic, publisher: entry.publisher }), demand, { news: recent }));
         }
         return verdicts;
       } catch (error) {
@@ -387,6 +403,32 @@ async function draft(config) {
       { onConflict: "id", ignoreDuplicates: true },
     )),
   });
+  return { ...metrics, ...(demand ? { demand: demand.report } : {}) };
+}
+
+/**
+ * Screens a headline against the posts already published: true if its title and summary sit at or above
+ * UNDERSTANDING.headlineKnown to one of them. The model loads on first use; if it cannot (offline, missing
+ * package), screening is off for the run and every headline is drafted as before. Excerpt-mode sources never
+ * reach this: they are not drafted.
+ */
+function headlineScreen(vectors) {
+  if (!vectors.size || /^off$/i.test(process.env.CONTENT_UNDERSTAND ?? "")) return null;
+  const published = [...vectors.values()].slice(-3000);
+  let embed = null, failed = false;
+  return async (item) => {
+    const text = headlineText(item);
+    if (failed || text.length < 20) return false;
+    try {
+      embed ??= await embedder();
+      const [vec] = await embed([text]);
+      return published.some((p) => cosine(vec, p) >= UNDERSTANDING.headlineKnown);
+    } catch {
+      failed = true;
+      console.error("Headline screening skipped (model unavailable); drafting without it.");
+      return false;
+    }
+  };
 }
 
 /**

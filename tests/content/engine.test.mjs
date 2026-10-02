@@ -492,3 +492,11 @@ test("prerequisites are folded to slugs, never the post's own concepts, at most 
   assert.deepEqual(settleDraft({ ...structuredClone(draft), assumes: undefined }, source).assumes, [], "missing means none");
   assert.deepEqual(checkDraft(settleDraft(structuredClone(draft), source), [source]), [], "an older-style draft still passes");
 });
+
+test("a headline the feed already has is screened out before any fetch or model call", async () => {
+  let calls = 0, fetched = 0; const screened = [];
+  const metrics = await draftCandidates({ groups:[group], retrieve:async()=>{ fetched++; return response; },
+    screen:async(item)=>{ screened.push(item.url); return true; }, generate:async()=>{ calls++; }, save:async()=>{} });
+  assert.deepEqual([calls, fetched, metrics.skippedAsKnown], [0, 0, 1]);
+  assert.deepEqual(screened, [source.url]);
+});

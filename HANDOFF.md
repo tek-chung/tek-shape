@@ -525,7 +525,25 @@ reader gate either way), so apply it with the rest.
   only; `status` (local) names them.
 - Tests: content 129 (mixer 3; batch, reasons, bridges and ladder tests rewritten for sources), SQL 68.
 
-Next T-Mixer phases (agreed plan, not started): 4 demand-led drafting (headline embeddings),
+Phase 3 committed as 603ef98; first `prepare` on mixer-1: reserve 60 re-ranked, 2 learnt stem fields, 1,013
+posts with vectors, baseline report card hit 58% / delight 30% / explorations 62.5%.
+
+## 5v. T-Mixer phase 4: demand-led drafting (5 Oct 2026, Claude)
+
+No migration. `scripts/content/demand.mjs`: `planDemand` (useful stock vs max(60, reads/day × 4); shortfall also
+counted per stem field and per area the sources produced in the last 30 days; ÷ draft yield, default 0.6,
+from `candidate_summary` once ≥ 30 drafts; floor `CONTENT_DRAFT_MIN` 2, ceiling `CONTENT_DRAFT_LIMIT`) and
+`withDemand` (triage score + 0.3 × need of the headline's stem field or area, or news need for headlines
+published in the last three days). `draft()` uses them unless `CONTENT_DEMAND=off`, and returns `demand`
+(numbers only). `draftCandidates({ screen })`: `headlineScreen` embeds title + summary locally and skips
+headlines ≥ `UNDERSTANDING.headlineKnown` (0.85, uncalibrated) to any of the last 3,000 post vectors, before
+any fetch or AI call (`skippedAsKnown`). New settings in `.env.example`.
+
+Expected: with ~1,000 useful posts waiting, runs draft the floor (2) plus news, ~20–40 a day instead of ~200.
+Watch `demand` and `skippedAsKnown` in the first runs; if the feed thins, raise `CONTENT_INVENTORY_DAYS` or
+`CONTENT_DRAFT_MIN`. Tests: content 134 (demand 4, screen 1).
+
+Next T-Mixer phases (agreed plan, not started):
 4 demand-led drafting (headline embeddings), 5 surfaces (Why this?, Your T, Dear T, Latest, Briefing ring,
 Atlas, Tracks). Earlier list, for reference: 1b concept graph (canonical concepts, `assumes` in the draft
 schema, depth ladders), 3 mixer with seven sources, 4 demand-led drafting (headline embeddings), 5 surfaces.

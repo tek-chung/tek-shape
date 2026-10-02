@@ -169,7 +169,7 @@ export const publisherOf = (group, url) =>
  * provider ends the run cleanly, keeping everything saved so far.
  */
 export async function draftCandidates({ groups, generate, save, concepts = [], preferences = [], retrieve = fetchSource, limit = 4, known = new Set(), sourceChars = 10000, checks = "strict", onProgress = () => {},
-  plan = null, triage = null, guidance = () => undefined, attachBodies = null, lookupKnown = null }) {
+  plan = null, triage = null, guidance = () => undefined, attachBodies = null, lookupKnown = null, screen = null }) {
   validateSources(groups);
   // `known` may be given whole (tests, small catalogues) or looked up per source (`lookupKnown`), so a run
   // never has to load every draft ever made. Either way it grows as this run learns more.
@@ -178,7 +178,7 @@ export async function draftCandidates({ groups, generate, save, concepts = [], p
     if (!lookupKnown || !urls.length) return;
     for (const url of await lookupKnown(urls)) known.add(url);
   };
-  const metrics = { discovered:0, retrieved:0, checked:0, held:0, sourceFailures:0, alreadyDrafted:0, modelFailures:0, stopped:null, triaged:0, skippedByTaste:0, excerpts:0 };
+  const metrics = { discovered:0, retrieved:0, checked:0, held:0, sourceFailures:0, alreadyDrafted:0, modelFailures:0, stopped:null, triaged:0, skippedByTaste:0, skippedAsKnown:0, excerpts:0 };
   const seen = new Set();
   // Progress carries publisher names and outcomes only — never article text — since CI logs are public.
   // `stage` says what the line is about: a feed, an excerpt (no AI, so not counted against `limit`), or a draft.
@@ -243,6 +243,9 @@ export async function draftCandidates({ groups, generate, save, concepts = [], p
     seen.add(url);
     if (known.has(url)) { metrics.alreadyDrafted++; continue; }
     metrics.discovered++;
+    // A headline whose idea the feed already has (judged by the understanding model, before any fetch or AI
+    // call) is passed over: the quota goes to something new.
+    if (screen && await screen({ url, publisher: group.publisher, ...(details.get(url) ?? {}) })) { metrics.skippedAsKnown++; continue; }
     // The article as the feed carried it, for reading in the app (and to draft from if the page is gated).
     const item = details.get(url) ?? {};
     const body = group.keepBody && item.body ? keepable(feedBlocks(item.body)) : null;

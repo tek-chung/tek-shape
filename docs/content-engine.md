@@ -156,11 +156,18 @@ All in `scripts/content/taste.mjs` (pure functions; tests in `tests/content/tast
    else a harder post where Harder was asked). Exploration share self-tunes between 15% and 30%.
    Variety: no two in a row from one field, at most 2 of 5 from one area, one per subtopic per batch, and each
    earlier post from the same publisher in the last ten placed multiplies a candidate by 0.25 + 0.75 × 0.5^k.
-5. **Upstream**: `planSources` orders sources (overdue first, then sampled enjoyment plus map-gap coverage; the
+5. **Demand-led drafting** (`demand.mjs`): before drafting, each run counts the useful stock (published,
+   unqueued, not resting, expected enjoyment ≥ 0.45, news under 14 days), the reader's pace (reads a day over
+   the last week) and how often drafts get published, and drafts just enough to keep about four days of
+   reading waiting — at least the reserve, at least two drafts a run, more when fresh news or a stem field or
+   an area the sources cover runs short. Those gaps raise matching headlines in triage. Headlines whose title and
+   summary sit at ≥ 0.85 to a published post are screened out by the local model before any fetch or AI call.
+   `CONTENT_DEMAND=off` restores the old behaviour.
+6. **Upstream**: `planSources` orders sources (overdue first, then sampled enjoyment plus map-gap coverage; the
    top third get two turns). One **triage** call per run files the next headlines; resting subtopics are
    skipped before any drafting call, and each source's most promising article is drafted first with its
    field's target difficulty.
-6. **Understanding** (`scripts/content/understand.mjs`, needs `202610030001_understanding.sql` and
+7. **Understanding** (`scripts/content/understand.mjs`, needs `202610030001_understanding.sql` and
    `npm install`): each published post (never an excerpt) is embedded by a small multilingual model,
    `Xenova/paraphrase-multilingual-MiniLM-L12-v2`, run locally — no API, no quota, ~120 MB downloaded once
    (cached in `.cache/transformers`, and by the workflow). Posts are grouped into idea clusters (about 25 posts
@@ -168,17 +175,17 @@ All in `scripts/content/taste.mjs` (pure functions; tests in `tests/content/tast
    learnt on a cluster carries to new subtopic names inside it; a candidate at cosine ≥ 0.9 to a post already
    in the feed is dropped unless it is harder; posts close to the last five placed (≥ 0.75) are scored down.
    `understand` prints the spread of nearest-neighbour similarities so those thresholds can be calibrated.
-7. **Depth ladders** (needs `202610040001_concepts.sql`): drafts name the concepts they assume as well as those they
+8. **Depth ladders** (needs `202610040001_concepts.sql`): drafts name the concepts they assume as well as those they
    teach; `understand` folds concept tags that mean the same idea into one canonical concept (similarity ≥ 0.85,
    commonest spelling first). Familiarity per concept: Harder counts in full, an enjoyed post half, a read a
    third, Not interesting nothing. A post reteaching familiar ideas (≥ 0.8) at no greater difficulty scores ×0.7;
    one whose prerequisites are at least half familiar and that teaches something new scores up to ×1.25 and can
    take the stretch slot as the next step.
-8. **Reasons and reading time** (needs `202610020001_mixer_foundations.sql`): every post placed in the feed
+9. **Reasons and reading time** (needs `202610020001_mixer_foundations.sql`): every post placed in the feed
    or reserve stores why (`reasons.why`: favourite, excerpt, thin-area, bridge, uncertain, breadth, harder)
    and which ranker placed it, and the app reports how long each post was in view (`dwell_ms`). Both are kept
    in the database only, never printed, and feed the coming T-Mixer phases.
-9. **Report card and niches**: `prepare` records each post's slot and saves a snapshot (`taste_snapshot`) that
+10. **Report card and niches**: `prepare` records each post's slot and saves a snapshot (`taste_snapshot`) that
    the Map shows: discovered niches, pauses, per-field enjoyment and the hit rates. `status` prints the same.
 
 ## Publishing

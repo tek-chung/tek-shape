@@ -24,6 +24,9 @@ export const UNDERSTANDING = {
   perCluster: 25,
   refreshDays: 7,
   growth: 0.2,
+  // A headline (title and summary) this similar to a post already published is taken to be an idea the feed
+  // has, and is not drafted. Headlines and posts are worded differently, hence lower than `duplicate`.
+  headlineKnown: 0.85,
   // Two concept tags at or above this similarity name the same idea and are folded into one concept.
   // Deliberately strict: "machine-learning" and "deep-learning" must stay apart.
   sameConcept: 0.85,
@@ -187,4 +190,9 @@ export function neighbourSpread(vectors, limit = 400) {
   best.sort((a, b) => a - b);
   const at = (q) => Math.round(best[Math.min(best.length - 1, Math.floor(q * best.length))] * 100) / 100;
   return { posts: sample.length, p50: at(0.5), p90: at(0.9), p99: at(0.99), aboveDuplicate: best.filter((s) => s >= UNDERSTANDING.duplicate).length };
+}
+
+/** What the model reads of a headline before anything is fetched: its title and the feed's summary. */
+export function headlineText(item) {
+  return [item.title, item.summary].filter((part) => typeof part === "string" && part.trim()).join(". ").replace(/\s+/g, " ").slice(0, 600);
 }
