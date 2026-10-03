@@ -5,6 +5,7 @@ import { ArrowLeft, BookOpen, CheckCheck, Sparkles, ThumbsDown, ThumbsUp } from 
 import { buildMap, coerceRows, type FieldNode, type KnowledgeMap as MapData, type Tally, type UmbrellaNode } from "@/lib/knowledgeMap";
 import { SOURCES, coerceTaste, subtopicKey, type Choice, type Pause, type Preference, type TasteSnapshot } from "@/lib/taste";
 import { placeOf } from "@/lib/taxonomy";
+import { DearT } from "./DearT";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : null);
@@ -220,6 +221,7 @@ export function KnowledgeMap({ client }: { client: SupabaseClient }) {
       : <p className="map-note"><strong>Breadth:</strong> {map.breadth} of {map.areas} areas. {map.deepest ? <><strong>Deepest:</strong> {map.deepest.umbrella.label}.</> : null}</p>}
     <TShape map={map} onOpen={(u) => go(u.umbrella.id)} />
     {snapshot ? <Stem snapshot={snapshot} /> : null}
+    <DearT client={client} />
     <p className="map-legend">Across the top: breadth, tinted where you have read. Hanging below: depth, from the number and difficulty of posts read and the deeper explanations opened. Tap an area to see its fields, then a field to see and steer its subtopics.</p>
     {snapshot ? <><Niches snapshot={snapshot} onOpen={(u, f) => go(u, f)} /><ReportCard snapshot={snapshot} /></> : null}
   </section>;

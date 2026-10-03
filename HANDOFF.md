@@ -580,7 +580,22 @@ remembered)` (security definer, caller's rows only; "Not due" refuses double tap
 - Tests: SQL 70 (echo schedule, refusals, RLS), content 135 (`chooseBriefing`), client 8. tsc and ESLint on
   changed files pass. Not run: build, Playwright, the ring and viewer on a phone.
 
-Next T-Mixer phases (agreed plan, not started): Dear T (natural-language steering, owner deferred), Atlas,
+## 5y. T-Mixer phase 5c: Dear T (7 Oct 2026, Claude)
+
+Migration `202610070001_dear_t.sql` (additive): `dear_t` (text ≤ 280, days 1/3/7, status pending/applied/failed,
+steers jsonb ≤ 8, until = sent + days), reader-readable; `dear_t_send` (five running at most) and `dear_t_remove`
+(security definer, caller's rows only). SPEC §9 records it.
+
+- `scripts/content/dear.mjs`: `dearSchema` (field enum, subtopic, more/less/snooze), `DEAR_INSTRUCTION` (request is
+  untrusted data), `settleSteers` (≤ 5, drops unknown fields/choices and repeats, matches subtopics the feed uses
+  by shared words, else keeps the name as written), `dearPreferences` (applied, unexpired, oldest first).
+- `run.mjs`: `dear-t` command and a step in `cycle` before `prepare` (one AI call per waiting request; left
+  waiting on provider failure); `loadTaste` appends running Dear T steers after the Map's, so they win while
+  they last. Counts only in output.
+- Map: `DearT.tsx` — write, choose a duration, send; running requests with their steers as chips; Remove.
+- Tests: content 138 (dear 3), SQL 71. tsc, ESLint pass. Not run: a real request through the model chain.
+
+Next T-Mixer phases (agreed plan, not started): Atlas,
 Tracks; tuning from the report card once a week or two of mixer-1 readings exist.
 Older list, for reference:
 4 demand-led drafting (headline embeddings), 5 surfaces (Why this?, Your T, Dear T, Latest, Briefing ring,

@@ -198,3 +198,13 @@ input:focus-visible { outline: 3px solid #8e5d30; outline-offset: 3px; }
 .echo-insight .eyebrow { color: #576b43; font-size: 9px; }
 .echo-insight p { font-size: 14px; line-height: 1.6; margin: 6px 0 0; }
 .echo-answers { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Dear T (SPEC §9): steering in your own words. */
+.dear-text { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font: inherit; font-size: 14px; color: var(--ink); background: white; resize: vertical; min-height: 64px; }
+.dear-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.dear-days { min-height: 44px; border: 1px solid var(--line); border-radius: 9px; padding: 0 10px; background: white; color: var(--ink); font: inherit; font-size: 13px; }
+.dear-list { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 12px; }
+.dear-list li { border-top: 1px solid var(--line); padding-top: 10px; }
+.dear-quote { margin: 0 0 4px; font-family: Georgia, serif; font-size: 14px; color: var(--ink); }
+.dear-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.dear-chip { font-size: 11px; border-radius: 12px; padding: 4px 9px; background: #e7eee2; color: #426039; }

@@ -4,14 +4,15 @@ import nextEnv from "@next/env";
 import { CLASSIFY_RULES, DRAFT_INSTRUCTION, discover, draftCandidates, feedArticles, modelSource, publisherOf, settleDraft, validateSources } from "./engine.mjs";
 import { extractArticle, fetchSource, pageExcerpt } from "./sources.mjs";
 import { ModelChainError, classifySchema, draftSchema, generateJSON, liveModels, modelConfig, triageSchema } from "./model.mjs";
-import { RANKER, buildTaste, chooseBriefing, seededRandom, judgeTopic, planSources, promptSummary, rankQueue, snapshotOf, sourceOf } from "./taste.mjs";
+import { RANKER, buildTaste, chooseBriefing, seededRandom, subtopicKey, judgeTopic, planSources, promptSummary, rankQueue, snapshotOf, sourceOf } from "./taste.mjs";
 import { cleanSubtopic, placeOf } from "./taxonomy.mjs";
 import { planDemand, withDemand } from "./demand.mjs";
+import { DEAR_INSTRUCTION, dearPreferences, dearSchema, settleSteers } from "./dear.mjs";
 import { DIMS, EMBED_MODEL, UNDERSTANDING, clusterCount, conceptText, cosine, foldConcepts, headlineText, clustersDue, embedder, kmeans, labelCluster, nearestCentroid, neighbourSpread, pack, postText, unpack } from "./understand.mjs";
 import { checkDraft, checkExcerpt, checkReview, excerptFound, recentConcepts } from "./editorial.mjs";
 
 nextEnv.loadEnvConfig(process.cwd());
-const COMMANDS = ["check", "probe", "draft", "review", "publish", "publish-checked", "prepare", "cycle", "classify", "bodies", "understand", "status", "providers", "models"];
+const COMMANDS = ["check", "probe", "draft", "review", "publish", "publish-checked", "prepare", "cycle", "classify", "bodies", "understand", "dear-t", "status", "providers", "models"];
 const [command = "help", id, note] = process.argv.slice(2);
 if (command === "help" || !COMMANDS.includes(command)) {
   console.log(`Content engine. See docs/content-engine.md.
@@ -28,6 +29,7 @@ if (command === "help" || !COMMANDS.includes(command)) {
   classify           file older posts (still under Other) in the subject map; one small AI call each
   bodies             save the full article for earlier posts from sources that keep bodies (no AI)
   understand         embed new posts with the local model and refresh idea clusters (no API calls)
+  dear-t             turn the reader's waiting Dear T requests into steers (one small AI call each)
   status             candidate counts, queue depth, today's per-provider usage
   providers          show the configured provider chain (never prints keys)
   models             ask each provider which models it serves now, and flag retired ones`);
@@ -84,7 +86,9 @@ async function loadSources() {
 
 /** The reader's taste, from everything they have done and every steer they have given. */
 async function loadTaste(posts, states, clusters = new Map(), aliases = new Map()) {
-  const [prefs, queue] = await Promise.all([all("topic_preference"), all("feed_queue")]);
+  const [mapPrefs, queue, dear] = await Promise.all([all("topic_preference"), all("feed_queue"), dearRequests()]);
+  // Dear T steers run until their request expires, and as the latest wishes they come after the Map's.
+  const prefs = [...mapPrefs, ...dearPreferences(dear)];
   return { model: buildTaste({ posts, states, prefs, queue, now: Date.now(), clusters, aliases }), queue };
 }
 
@@ -122,6 +126,47 @@ async function loadAliases() {
     if (!missingMigration(error)) throw error;
     return new Map();
   }
+}
+
+/** The reader's Dear T requests still running, or none before migration 202610070001. */
+async function dearRequests() {
+  try {
+    return await result(db.from("dear_t").select("id,text,status,steers,created_at,until").gt("until", new Date().toISOString()).order("created_at"));
+  } catch (error) {
+    if (!missingMigration(error)) throw error;
+    return [];
+  }
+}
+
+/**
+ * The `dear-t` command, and part of `cycle`: each waiting request is filed in the subject map by one small AI
+ * call and saved as steers. Prints counts only: the requests are the reader's own words.
+ */
+async function applyDearT(config) {
+  const waiting = (await dearRequests()).filter((r) => r.status === "pending");
+  const metrics = { waiting: waiting.length, applied: 0, failed: 0 };
+  if (!waiting.length) return metrics;
+  const names = new Map();
+  for (const post of await all("post", "field,subtopic")) {
+    if (!post.subtopic) continue;
+    const key = subtopicKey(placeOf(post.field).field, post.subtopic);
+    if (!names.has(key)) names.set(key, cleanSubtopic(post.subtopic));
+  }
+  const reserve = ({ provider, cost, dailyUsd, calls }) => result(db.rpc("reserve_content_call", { p_provider: provider, p_cost: cost, p_daily_limit: dailyUsd, p_call_limit: calls }));
+  for (const request of waiting) {
+    try {
+      const json = await generateJSON({ schema: dearSchema, instruction: DEAR_INSTRUCTION, input: { request: request.text }, config, trace: [], reserve });
+      const steers = settleSteers(json, names);
+      await result(db.from("dear_t").update({ status: steers.length ? "applied" : "failed", steers, applied_at: new Date().toISOString(),
+        note: steers.length ? null : "No subject to steer was found in this request." }).eq("id", request.id));
+      metrics[steers.length ? "applied" : "failed"]++;
+    } catch (error) {
+      if (!(error instanceof ModelChainError)) throw error;
+      // Left waiting: the next run tries again.
+      if (error.exhausted || error.rateLimited) break;
+    }
+  }
+  return metrics;
 }
 
 /** Replace the reader's Briefing ring. Before migration 202610060001 there is no ring: a hint instead. */
@@ -855,11 +900,12 @@ async function main() {
       budget, runs,
     }, null, 2));
   } else {
-    const config = ["draft", "cycle", "classify"].includes(command) ? modelConfig(process.env) : null;
+    const config = ["draft", "cycle", "classify", "dear-t"].includes(command) ? modelConfig(process.env) : null;
     const metrics = await withRun(command, async () => {
       if (command === "classify") return classify(config);
       if (command === "bodies") return attachSavedArticles();
       if (command === "understand") return understand();
+      if (command === "dear-t") return applyDearT(config);
       if (command === "draft") return draft(config);
       if (command === "publish-checked") return publishChecked();
       if (command === "prepare") return prepare();
@@ -867,7 +913,9 @@ async function main() {
       console.error("Drafting from your sources. Each post takes up to two AI calls; this can take a few minutes.");
       const drafted = await draft(config);
       const published = autoPublish() ? await publishChecked() : { skipped: "Set CONTENT_AUTO_PUBLISH=true to publish without review" };
-      return { drafted, published, understood: await understandIfOn(), queued: await prepare() };
+      // Dear T before prepare, so a request sent since the last run shapes this one.
+      const steered = await applyDearT(config).catch((error) => (missingMigration(error) ? { skipped: "apply 202610070001_dear_t.sql" } : Promise.reject(error)));
+      return { drafted, published, understood: await understandIfOn(), steered, queued: await prepare() };
     });
     console.log(JSON.stringify(metrics, null, 2));
   }
