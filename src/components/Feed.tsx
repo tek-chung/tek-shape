@@ -42,7 +42,21 @@ export function Feed({
   const readHere = posts.filter((post) => state.posts[post.id]?.readAt)
     .sort((a, b) => Date.parse(state.posts[b.id]?.readAt ?? "") - Date.parse(state.posts[a.id]?.readAt ?? ""));
   const readList = useList(client, "read", view === "read", readHere);
-  const latest = useList(client, "latest", view === "latest", []);
+  // Tracks: fields pinned on the Map, each a filter on Latest.
+  const [tracks, setTracks] = useState<string[]>([]);
+  const [trackOn, setTrackOn] = useState<string | null>(null);
+  useEffect(() => {
+    if (view !== "latest") return;
+    let active = true;
+    Promise.resolve()
+      .then(() => client.from("track").select("field").order("created_at"))
+      .then(({ data, error: rpcError }) => {
+        if (active && !rpcError && Array.isArray(data)) setTracks(data.flatMap((r: { field?: unknown }) => (typeof r.field === "string" ? [r.field] : [])));
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [client, view]);
+  const latest = useList(client, "latest", view === "latest", [], trackOn);
   const extras = useExtras(client, ready, sitting);
   // The briefing story open over the feed, if any; like the reader, it sits on the history stack.
   const [story, setStory] = useState<number | null>(null);
@@ -349,7 +363,7 @@ export function Feed({
             Map
           </button>
         </nav>
-        {view === "map" ? <KnowledgeMap client={client} /> : <>
+        {view === "map" ? <KnowledgeMap client={client} states={state.posts} onChange={updatePost} /> : <>
         <div className="feed-heading">
           <h2>{view === "feed" ? "Explore something different" : view === "library" ? "Keep good ideas close" : view === "latest" ? "Everything, newest first" : "Already read"}</h2>
           <span>{view === "feed" ? `${unread} unread` : view === "library" ? `${savedCount} saved` : view === "latest" ? "not personalised" : "newest first"}</span>
@@ -381,6 +395,11 @@ export function Feed({
         <p className="sr-only" role="status">
           {announcement}
         </p>
+        {view === "latest" && tracks.length > 0 && <div className="track-chips" role="group" aria-label="Tracks">
+          <button type="button" className="steer-button" aria-pressed={trackOn === null} onClick={() => setTrackOn(null)}>Everything</button>
+          {tracks.map((t) => <button key={t} type="button" className="steer-button" aria-pressed={trackOn === t} onClick={() => setTrackOn(trackOn === t ? null : t)}>
+            {placeOf(t)?.field.label ?? t}</button>)}
+        </div>}
         {view === "feed" && <BriefingRing posts={extras.briefing} states={state.posts} onOpen={openStory} />}
         {view === "feed" && fresh && (
           <div className="fresh-note" role="status">

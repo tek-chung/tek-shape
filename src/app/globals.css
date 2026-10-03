@@ -208,3 +208,14 @@ input:focus-visible { outline: 3px solid #8e5d30; outline-offset: 3px; }
 .dear-quote { margin: 0 0 4px; font-family: Georgia, serif; font-size: 14px; color: var(--ink); }
 .dear-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .dear-chip { font-size: 11px; border-radius: 12px; padding: 4px 9px; background: #e7eee2; color: #426039; }
+
+/* Atlas (SPEC §9): fields to discover. */
+.atlas-grid { list-style: none; padding: 0; margin: 10px 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.atlas-tile { width: 100%; min-height: 92px; display: grid; align-content: start; gap: 4px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: #fffefa; padding: 12px; }
+.atlas-area { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.atlas-label { font-family: Georgia, serif; font-size: 15px; line-height: 1.25; color: var(--ink); }
+.atlas-count { font-size: 11px; color: #536958; }
+.story-finale { padding: 0 16px 28px; max-width: 680px; width: 100%; margin: 0 auto; }
+/* Tracks on Latest. */
+.track-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 4px 0 14px; }
+.track-chips .steer-button { flex: none; }

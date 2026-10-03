@@ -595,7 +595,22 @@ steers jsonb ≤ 8, until = sent + days), reader-readable; `dear_t_send` (five r
 - Map: `DearT.tsx` — write, choose a duration, send; running requests with their steers as chips; Remove.
 - Tests: content 138 (dear 3), SQL 71. tsc, ESLint pass. Not run: a real request through the model chain.
 
-Next T-Mixer phases (agreed plan, not started): Atlas,
+## 5z. T-Mixer phase 5d: Atlas and Tracks (8 Oct 2026, Claude)
+
+Migration `202610080001_tracks.sql` (additive): `track` (user, field; reader-readable) and `set_track(field, on)`
+(security definer, ten at most). SPEC §9 records both.
+
+- Atlas (Map root): `src/lib/atlas.ts` `atlasTiles` — fields with posts waiting and ≤ 2 read (or a niche),
+  unexplored first, 12 at most, never Other. A tile loads up to five unread posts of that field (newest first,
+  from `post` via `lib/postRows`) into `StoryViewer` (now with `label` and `finale`), on the history stack;
+  the finale offers Add to my stem / More of this / Pin as a track. KnowledgeMap now takes `states` and
+  `onChange` from Feed so those posts read and rate like any other.
+- Tracks: field page has "Pin to Latest as a track"; Latest shows track chips (Everything + pinned fields) and
+  `useList("latest", …, field)` filters by the chosen one. Tracks do not change ranking.
+- Tests: SQL 72 (tracks), client 9 (`atlasTiles`). tsc and ESLint pass. Not run: build, Playwright, phone.
+
+That completes the agreed T-Mixer plan. Next: a week or two of reading, then tune from the report card.
+Older list, for reference: Atlas,
 Tracks; tuning from the report card once a week or two of mixer-1 readings exist.
 Older list, for reference:
 4 demand-led drafting (headline embeddings), 5 surfaces (Why this?, Your T, Dear T, Latest, Briefing ring,

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Post, PostState } from "@/types/post";
 import type { PostPatch } from "@/lib/storage";
@@ -36,9 +36,13 @@ export function BriefingRing({ posts, states, onOpen }: { posts: Post[]; states:
  * One story at a time, over the feed. Opening a story marks it seen; five seconds on it count as reading, as
  * a key insight on screen for five seconds does in the feed. Back (or the phone's back gesture) closes it.
  */
-export function StoryViewer({ posts, start, states, onChange, onClose }: {
+export function StoryViewer({ posts, start, states, onChange, onClose, label = "Briefing", finale = null }: {
   posts: Post[]; start: number; states: Record<string, PostState>;
   onChange: (id: string, patch: PostPatch) => void; onClose: () => void;
+  /** What the dialog is, for screen readers: "Briefing", or an Atlas field. */
+  label?: string;
+  /** Shown under the last post, e.g. the Atlas's "Add to my stem". */
+  finale?: ReactNode;
 }) {
   const [index, setIndex] = useState(start);
   const close = useRef<HTMLButtonElement | null>(null);
@@ -69,7 +73,7 @@ export function StoryViewer({ posts, start, states, onChange, onClose }: {
   }, [onClose, posts.length]);
 
   if (!post) return null;
-  return <div className="story-viewer" role="dialog" aria-modal="true" aria-label={`Briefing, story ${index + 1} of ${posts.length}`}>
+  return <div className="story-viewer" role="dialog" aria-modal="true" aria-label={`${label}, ${index + 1} of ${posts.length}`}>
     <div className="story-bar">
       <button ref={close} type="button" className="text-button" onClick={onClose}><ArrowLeft size={15} aria-hidden="true" /> Back to your feed</button>
       <span className="story-dots" aria-hidden="true">{posts.map((p, i) => <span key={p.id} className={i === index ? "dot dot-on" : "dot"} />)}</span>
@@ -83,6 +87,7 @@ export function StoryViewer({ posts, start, states, onChange, onClose }: {
         ? <button type="button" className="load-button" onClick={() => setIndex(index + 1)}>Next story <ChevronRight size={17} aria-hidden="true" /></button>
         : <button type="button" className="load-button" onClick={onClose}>Done</button>}
     </div>
+    {index === posts.length - 1 && finale ? <div className="story-finale">{finale}</div> : null}
   </div>;
 }
 

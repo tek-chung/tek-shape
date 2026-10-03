@@ -6,6 +6,11 @@ import { buildMap, coerceRows, type FieldNode, type KnowledgeMap as MapData, typ
 import { SOURCES, coerceTaste, subtopicKey, type Choice, type Pause, type Preference, type TasteSnapshot } from "@/lib/taste";
 import { placeOf } from "@/lib/taxonomy";
 import { DearT } from "./DearT";
+import { StoryViewer } from "./Extras";
+import { atlasTiles } from "@/lib/atlas";
+import { POST_COLUMNS, asPostJson, type Row } from "@/lib/postRows";
+import { coercePosts, type PostPatch } from "@/lib/storage";
+import type { Post, PostState } from "@/types/post";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : null);
@@ -54,6 +59,23 @@ function Stem({ snapshot }: { snapshot: TasteSnapshot }) {
       ? <>{names.join(", ")}{snapshot.stemChosen ? ", as you chose." : ": learnt from your reading. Open a field and tap Stem to choose up to three yourself."}</>
       : "Not settled yet. Open a field and tap Stem to choose up to three deep fields, or keep reading and the feed will learn them."}</p>
     {mix ? <p className="map-note">Each batch: {mix}.</p> : null}
+  </section>;
+}
+
+/** The Atlas: fields to discover (after Instagram's Explore grid). Tapping one opens up to five of its posts. */
+function Atlas({ map, niches, busy, onOpen }: { map: MapData; niches: { field: string }[]; busy: boolean; onOpen: (field: string, label: string) => void }) {
+  const tiles = atlasTiles(map, niches);
+  if (!tiles.length) return null;
+  return <section className="map-section" aria-labelledby="atlas-title">
+    <h3 id="atlas-title" className="map-subtitle">Atlas</h3>
+    <p className="map-note">Fields with posts waiting that you have barely read. Open one for five of its posts.</p>
+    <ul className="atlas-grid">{tiles.map((t) => <li key={t.field}>
+      <button type="button" className="atlas-tile" disabled={busy} onClick={() => onOpen(t.field, t.label)}>
+        <span className="atlas-area">{t.area}{t.niche ? " · a niche of yours" : t.read === 0 ? " · new to you" : ""}</span>
+        <span className="atlas-label">{t.label}</span>
+        <span className="atlas-count">{t.waiting} waiting</span>
+      </button>
+    </li>)}</ul>
   </section>;
 }
 
@@ -116,7 +138,15 @@ function ReportCard({ snapshot }: { snapshot: TasteSnapshot }) {
   </section>;
 }
 
-export function KnowledgeMap({ client }: { client: SupabaseClient }) {
+export function KnowledgeMap({ client, states, onChange }: {
+  client: SupabaseClient;
+  /** The reader's state per post, and the feed's save, so Atlas posts work like any other. */
+  states: Record<string, PostState>;
+  onChange: (id: string, patch: PostPatch) => void;
+}) {
+  const [tracks, setTracks] = useState<string[]>([]);
+  // An Atlas field open as a short run of posts, over the map.
+  const [atlas, setAtlas] = useState<{ field: string; label: string; posts: Post[] } | null>(null);
   const [map, setMap] = useState<MapData | null>(null);
   const [snapshot, setSnapshot] = useState<TasteSnapshot | null>(null);
   const [prefs, setPrefs] = useState<Preference[]>([]);
@@ -131,14 +161,17 @@ export function KnowledgeMap({ client }: { client: SupabaseClient }) {
   useEffect(() => {
     let active = true;
     Promise.resolve()
-      .then(() => Promise.all([client.rpc("knowledge_map"), client.rpc("taste_view")]))
-      .then(([mapResult, tasteResult]) => {
+      .then(() => Promise.all([client.rpc("knowledge_map"), client.rpc("taste_view"), client.from("track").select("field")]))
+      .then(([mapResult, tasteResult, trackResult]) => {
         if (!active) return;
         if (mapResult.error) throw mapResult.error;
         setMap(buildMap(coerceRows(mapResult.data))); setError("");
         // Taste is optional: before the first scheduled run, or before its migration, the map still works.
         const taste = tasteResult.error ? { snapshot: null, preferences: [] } : coerceTaste(tasteResult.data);
         setSnapshot(taste.snapshot); setPrefs(taste.preferences);
+        // Tracks are optional too (before 202610080001 there are none).
+        setTracks(!trackResult.error && Array.isArray(trackResult.data)
+          ? trackResult.data.flatMap((r: { field?: unknown }) => (typeof r.field === "string" ? [r.field] : [])) : []);
       })
       .catch(() => { if (active) setError("Your knowledge map could not be loaded. Check your connection and try again."); });
     return () => { active = false; };
@@ -166,6 +199,44 @@ export function KnowledgeMap({ client }: { client: SupabaseClient }) {
     } finally { setBusy(false); }
   }
 
+  /** Pin a field to Latest as a track, or unpin it. */
+  async function track(field: string, label: string, on: boolean) {
+    const before = tracks;
+    setTracks(on ? [...tracks, field] : tracks.filter((t) => t !== field));
+    setBusy(true);
+    try {
+      const { error: rpcError } = await client.rpc("set_track", { p_field: field, p_on: on });
+      if (rpcError) throw rpcError;
+      setNotice(on ? `${label} is pinned to Latest as a track.` : `${label} is no longer a track.`);
+    } catch (error) {
+      setTracks(before);
+      setNotice(/Ten tracks/.test(String((error as { message?: unknown })?.message ?? "")) ? "Ten tracks at most. Unpin one first." : "That change could not be saved. Check your connection and try again.");
+    } finally { setBusy(false); }
+  }
+
+  /** Open an Atlas field: up to five unread posts there, newest first, read like briefing stories. */
+  async function explore(field: string, label: string) {
+    setBusy(true);
+    try {
+      const { data, error: rpcError } = await client.from("post").select(POST_COLUMNS).eq("status", "published").eq("field", field)
+        .order("published_at", { ascending: false }).limit(25);
+      if (rpcError) throw rpcError;
+      const posts = coercePosts((data ?? []).map((row) => asPostJson(row as Row))).filter((p) => !states[p.id]?.readAt).slice(0, 5);
+      if (!posts.length) { setNotice(`Nothing new is waiting in ${label} just now.`); return; }
+      history.pushState({ ...history.state, atlas: field }, "");
+      setAtlas({ field, label, posts });
+    } catch {
+      setNotice("That field could not be opened. Check your connection and try again.");
+    } finally { setBusy(false); }
+  }
+  useEffect(() => {
+    if (!atlas) return;
+    const pop = () => setAtlas(null);
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, [atlas]);
+  const closeAtlas = () => { if (history.state?.atlas !== undefined) history.back(); else setAtlas(null); };
+
   if (error) return <div className="empty-state"><p role="alert">{error}</p><button className="text-button" onClick={retry}>Retry</button></div>;
   if (!map) return <p role="status" className="map-note">Drawing your map…</p>;
 
@@ -184,6 +255,10 @@ export function KnowledgeMap({ client }: { client: SupabaseClient }) {
         {taste ? ` You enjoy about ${pct(taste.mean)} of what you read here; posts aim at difficulty ${taste.targetDifficulty.toFixed(1)} of 5.` : ""}</p>
       {pauseNote(taste?.paused ?? null) ? <p className="map-note map-paused">{pauseNote(taste?.paused ?? null)}. Tap More to bring it back.</p> : null}
       <Steer stem label={fieldLabel} choice={choiceOf("field", field.field.id)} busy={busy} onChoose={(c) => void steer("field", field.field.id, field.field.label, c)} />
+      <button type="button" className="text-button" disabled={busy} aria-pressed={tracks.includes(field.field.id)}
+        onClick={() => void track(field.field.id, field.field.label, !tracks.includes(field.field.id))}>
+        {tracks.includes(field.field.id) ? "Unpin from Latest" : "Pin to Latest as a track"}
+      </button>
       {status}
       <ul className="map-list">{field.subtopics.map((s) => {
         const key = subtopicKey(field.field.id, s.name);
@@ -221,7 +296,15 @@ export function KnowledgeMap({ client }: { client: SupabaseClient }) {
       : <p className="map-note"><strong>Breadth:</strong> {map.breadth} of {map.areas} areas. {map.deepest ? <><strong>Deepest:</strong> {map.deepest.umbrella.label}.</> : null}</p>}
     <TShape map={map} onOpen={(u) => go(u.umbrella.id)} />
     {snapshot ? <Stem snapshot={snapshot} /> : null}
+    <Atlas map={map} niches={snapshot?.niches ?? []} busy={busy} onOpen={(f, label) => void explore(f, label)} />
+    {status}
     <DearT client={client} />
+    {atlas && <StoryViewer label={atlas.label} posts={atlas.posts} start={0} states={states} onChange={onChange} onClose={closeAtlas}
+      finale={<div className="steer" role="group" aria-label={`After ${atlas.label}`}>
+        <button type="button" className="steer-button" disabled={busy} onClick={() => void steer("field", atlas.field, atlas.label, "stem")}>Add to my stem</button>
+        <button type="button" className="steer-button" disabled={busy} onClick={() => void steer("field", atlas.field, atlas.label, "more")}>More of this</button>
+        <button type="button" className="steer-button" disabled={busy || tracks.includes(atlas.field)} onClick={() => void track(atlas.field, atlas.label, true)}>Pin as a track</button>
+      </div>} />}
     <p className="map-legend">Across the top: breadth, tinted where you have read. Hanging below: depth, from the number and difficulty of posts read and the deeper explanations opened. Tap an area to see its fields, then a field to see and steer its subtopics.</p>
     {snapshot ? <><Niches snapshot={snapshot} onOpen={(u, f) => go(u, f)} /><ReportCard snapshot={snapshot} /></> : null}
   </section>;

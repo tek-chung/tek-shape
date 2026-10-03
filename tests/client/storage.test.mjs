@@ -104,3 +104,17 @@ test("why a post was placed, in plain words, from whatever the engine stored", a
   assert.match(many.at(-1), /above your usual level/);
   assert.match(explainPlacement({ why: "something-new", field: "nope" }, names)[0], /Close to what you enjoy in this field/);
 });
+
+test("the Atlas offers fields with posts waiting that you have barely read, unexplored first, niches included", async () => {
+  const { atlasTiles } = await import("../../src/lib/atlas.ts");
+  const field = (id, posts, read) => ({ field: { id, label: id }, posts, read });
+  const map = { umbrellas: [
+    { umbrella: { id: "life-sciences", short: "Life" }, fields: [field("neuroscience", 30, 12), field("ecology", 5, 0), field("genetics", 4, 2)] },
+    { umbrella: { id: "other", short: "Other" }, fields: [field("general", 9, 0)] },
+    { umbrella: { id: "mathematics", short: "Maths" }, fields: [field("topology", 0, 0), field("statistics", 8, 6)] },
+  ] };
+  const tiles = atlasTiles(map, [{ field: "statistics" }]);
+  assert.deepEqual(tiles.map((t) => t.field), ["ecology", "statistics", "genetics"]);
+  assert.deepEqual(tiles[0], { field: "ecology", label: "ecology", area: "Life", waiting: 5, read: 0, niche: false });
+  assert.equal(atlasTiles(map, [], 1).length, 1);
+});

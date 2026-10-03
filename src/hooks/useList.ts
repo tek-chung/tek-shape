@@ -17,7 +17,7 @@ const unloaded: ListData = { items: [], atEnd: false, offline: false, loaded: fa
  * no ranking, no personalisation (X's Following, Instagram's chronological feeds) — a baseline to compare
  * the feed with, and a way round it.
  */
-export function useList(client: SupabaseClient, kind: "bookmarked" | "read" | "latest", open: boolean, fallback: Post[]) {
+export function useList(client: SupabaseClient, kind: "bookmarked" | "read" | "latest", open: boolean, fallback: Post[], field: string | null = null) {
   const [data, setData] = useState<ListData>(unloaded);
   const [loadingMore, setLoadingMore] = useState(false);
   const busy = useRef(false);
@@ -29,7 +29,10 @@ export function useList(client: SupabaseClient, kind: "bookmarked" | "read" | "l
   // Fetching only: state is set by whoever awaits it, never synchronously inside an effect.
   const fetchPage = useCallback(async (offset: number) => {
     if (kind === "latest") {
-      const { data: rows, error } = await client.from("post").select(POST_COLUMNS).eq("status", "published")
+      // A track narrows Latest to one field.
+      let query = client.from("post").select(POST_COLUMNS).eq("status", "published");
+      if (field) query = query.eq("field", field);
+      const { data: rows, error } = await query
         .order("published_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + LIST_PAGE - 1);
       if (error) throw error;
       return coercePosts((rows ?? []).map((row) => asPostJson(row as Row)));
@@ -37,7 +40,7 @@ export function useList(client: SupabaseClient, kind: "bookmarked" | "read" | "l
     const { data: rows, error } = await client.rpc("saved_page", { p_kind: kind, p_offset: offset, p_limit: LIST_PAGE });
     if (error) throw error;
     return coercePosts(rows);
-  }, [client, kind]);
+  }, [client, kind, field]);
 
   // Refetch on every opening, so a post read or saved a moment ago is listed. The previous copy stays on
   // screen until the fresh one arrives.
