@@ -21,10 +21,10 @@ export function BriefingRing({ posts, states, onOpen }: { posts: Post[]; states:
         const opened = !!(states[post.id]?.firstSeenAt || states[post.id]?.readAt);
         const place = placeOf(post.field);
         return <li key={post.id}>
-          <button type="button" className={opened ? "ring ring-seen" : "ring"} onClick={() => onOpen(index)}
+          <button type="button" className={opened ? "brief-ring brief-ring-seen" : "brief-ring"} onClick={() => onOpen(index)}
             aria-label={`${post.title}${opened ? "" : ", new"}`}>
-            <span className="ring-circle" aria-hidden="true">{place?.umbrella.short ?? "News"}</span>
-            <span className="ring-title" aria-hidden="true">{post.title}</span>
+            <span className="brief-ring-circle" aria-hidden="true">{place?.umbrella.short ?? "News"}</span>
+            <span className="brief-ring-title" aria-hidden="true">{post.title}</span>
           </button>
         </li>;
       })}

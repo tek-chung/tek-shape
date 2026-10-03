@@ -295,10 +295,6 @@ export function KnowledgeMap({ client, states, onChange }: {
       ? <p className="map-note">Read a few posts and your map will start to take shape here.</p>
       : <p className="map-note"><strong>Breadth:</strong> {map.breadth} of {map.areas} areas. {map.deepest ? <><strong>Deepest:</strong> {map.deepest.umbrella.label}.</> : null}</p>}
     <TShape map={map} onOpen={(u) => go(u.umbrella.id)} />
-    {snapshot ? <Stem snapshot={snapshot} /> : null}
-    <Atlas map={map} niches={snapshot?.niches ?? []} busy={busy} onOpen={(f, label) => void explore(f, label)} />
-    {status}
-    <DearT client={client} />
     {atlas && <StoryViewer label={atlas.label} posts={atlas.posts} start={0} states={states} onChange={onChange} onClose={closeAtlas}
       finale={<div className="steer" role="group" aria-label={`After ${atlas.label}`}>
         <button type="button" className="steer-button" disabled={busy} onClick={() => void steer("field", atlas.field, atlas.label, "stem")}>Add to my stem</button>
@@ -306,6 +302,10 @@ export function KnowledgeMap({ client, states, onChange }: {
         <button type="button" className="steer-button" disabled={busy || tracks.includes(atlas.field)} onClick={() => void track(atlas.field, atlas.label, true)}>Pin as a track</button>
       </div>} />}
     <p className="map-legend">Across the top: breadth, tinted where you have read. Hanging below: depth, from the number and difficulty of posts read and the deeper explanations opened. Tap an area to see its fields, then a field to see and steer its subtopics.</p>
+    {snapshot ? <Stem snapshot={snapshot} /> : null}
+    <Atlas map={map} niches={snapshot?.niches ?? []} busy={busy} onOpen={(f, label) => void explore(f, label)} />
+    {status}
+    <DearT client={client} />
     {snapshot ? <><Niches snapshot={snapshot} onOpen={(u, f) => go(u, f)} /><ReportCard snapshot={snapshot} /></> : null}
   </section>;
 }
