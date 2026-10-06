@@ -69,6 +69,14 @@ The content mix should include BOTH current news and timeless knowledge. Do not 
 
 Posts should be accessible to an intelligent adult without assuming specialist training, but not condescending or repeatedly introductory. Each should have a meaningful takeaway and an optional deeper layer.
 
+Difficulty scale (added 9 October 2026; src/data/levels.json is the source of truth). Every drafted post is graded 1–5 for an intelligent adult who is not a specialist in the field, by what it assumes and does rather than its subject:
+1. Orientation: assumes nothing; one everyday idea, without jargon (why ice floats).
+2. Grounding: assumes general knowledge; names a concept and shows what it is, defining any term it uses (what a base rate is).
+3. Mechanism: assumes the basics of the field; explains how or why, step by step or with a simple model (how Bayes' theorem updates a belief).
+4. Specialist: assumes the field's vocabulary; a method, a limitation, a debate, or reasoning with numbers (why priors dominate with small samples).
+5. Frontier: assumes working knowledge of the field; open questions and competing theories, in technical detail (disputes over objective priors).
+Level 4–5 posts should name their prerequisites; level 1 posts should not need any. Excerpts are not graded. Each card shows its level briefly (for example "L3"), named in full for screen readers.
+
 Personalisation must distinguish:
 - “More”: maintain topic/angle and difficulty.
 - “Uninteresting”: reduce similar content without excluding an entire discipline.

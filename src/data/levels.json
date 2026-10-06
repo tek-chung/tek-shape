@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "reader": "an intelligent adult who is not a specialist in the field",
+  "levels": [
+    { "level": 1, "name": "Orientation", "assumes": "nothing", "does": "one everyday idea, without jargon", "example": "why ice floats" },
+    { "level": 2, "name": "Grounding", "assumes": "general knowledge", "does": "names a concept and shows what it is, defining any term it uses", "example": "what a base rate is" },
+    { "level": 3, "name": "Mechanism", "assumes": "the basics of the field", "does": "explains how or why, step by step or with a simple model", "example": "how Bayes' theorem updates a belief" },
+    { "level": 4, "name": "Specialist", "assumes": "the field's vocabulary", "does": "a method, a limitation, a debate, or reasoning with numbers", "example": "why priors dominate with small samples" },
+    { "level": 5, "name": "Frontier", "assumes": "working knowledge of the field", "does": "open questions and competing theories, in technical detail", "example": "disputes over objective priors" }
+  ]
+}

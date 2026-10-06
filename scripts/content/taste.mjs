@@ -161,7 +161,8 @@ export function buildTaste({ posts, states, prefs = [], queue = [], now = Date.n
       if (learnt) familiar.set(concept, (familiar.get(concept) ?? 0) + learnt * w);
     }
     const d = difficulty.get(place.field) ?? { w: 0, wd: 0, shift: 0 };
-    if (reward >= READ_MIN) { d.w += w; d.wd += w * (post.difficulty ?? 2); }
+    // Excerpts are the publisher's words, not graded on the scale: they say nothing about the level you read at.
+    if (reward >= READ_MIN && post.kind !== "excerpt") { d.w += w; d.wd += w * (post.difficulty ?? 2); }
     if (state.rating === "harder") d.shift += 0.4 * w;
     if (reward <= REWARDS.skipped && (post.difficulty ?? 2) >= 4) d.shift -= 0.3 * w;
     difficulty.set(place.field, d);

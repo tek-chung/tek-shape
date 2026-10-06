@@ -221,3 +221,5 @@ input:focus-visible { outline: 3px solid #8e5d30; outline-offset: 3px; }
 /* Tracks on Latest. */
 .track-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 4px 0 14px; }
 .track-chips .steer-button { flex: none; }
+
+.sample abbr { text-decoration: none; cursor: help; }

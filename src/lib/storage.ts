@@ -176,9 +176,10 @@ export function coercePost(value: unknown): Post | null {
   const field = slug(value.field);
   const subtopic = coerceText(value.subtopic, 100) ?? undefined;
   const queued = coerceText(value.queuedAt, 40);
+  const difficulty = !excerpt && typeof value.difficulty === "number" && Number.isInteger(value.difficulty) && value.difficulty >= 1 && value.difficulty <= 5 ? value.difficulty : undefined;
   const queuedAt = queued && Number.isFinite(Date.parse(queued)) ? queued : undefined;
   return { id, topic, title, explanation, insight, deeper, publishedAt, status, contentType, sources,
-    ...(umbrella ? { umbrella } : {}), ...(field ? { field } : {}), ...(subtopic ? { subtopic } : {}), ...(queuedAt ? { queuedAt } : {}),
+    ...(difficulty ? { difficulty } : {}), ...(umbrella ? { umbrella } : {}), ...(field ? { field } : {}), ...(subtopic ? { subtopic } : {}), ...(queuedAt ? { queuedAt } : {}),
     ...(eventDate ? {eventDate} : {}), ...(source ? { source } : {}),
     ...(excerpt ? { kind: "excerpt" as const } : {}), ...(value.hasBody === true ? { hasBody: true } : {}) };
 }

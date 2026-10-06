@@ -366,3 +366,11 @@ test("the briefing: today's unread news, best first, one post per story, two per
   assert.ok(ids.filter((id) => [a.id, c.id, d.id].includes(id)).length <= 2, "two per publisher at most");
   assert.ok(ids.length >= 3 && ids.length <= 5, ids.join());
 });
+
+test("excerpts are not graded, so reading them does not pull a field's level down", () => {
+  const hard = [1, 2, 3].map((i) => post("ethics", `Hard ${i}`, { difficulty: 4 }));
+  const excerpts = [1, 2, 3, 4, 5, 6].map((i) => ({ ...post("ethics", `Excerpt ${i}`, { difficulty: 1 }), kind: "excerpt" }));
+  const all = [...hard, ...excerpts];
+  const model = buildTaste({ posts: all, states: all.map((p) => state(p, { read_at: ago(1) })), now });
+  assert.equal(model.targetDifficulty("ethics"), 4);
+});

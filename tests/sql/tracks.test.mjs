@@ -20,7 +20,7 @@ before(async () => {
   await db.exec(`insert into auth.users values('${reader}'),('${stranger}'); insert into public.allowed_reader(user_id) values('${reader}');`);
   for (const name of ["202609230001_content_engine", "202609240001_model_providers", "202609250001_unread_feed", "202609260001_knowledge_map",
     "202609270001_taste", "202609280001_feed_queued_at", "202609290001_controls_mark_read", "202609300001_excerpts", "202610010001_feed_reserve",
-    "202610020001_mixer_foundations", "202610030001_understanding", "202610040001_concepts", "202610050001_stem", "202610060001_briefing_echoes", "202610070001_dear_t", "202610080001_tracks"])
+    "202610020001_mixer_foundations", "202610030001_understanding", "202610040001_concepts", "202610050001_stem", "202610060001_briefing_echoes", "202610070001_dear_t", "202610080001_tracks", "202610090001_levels"])
     await db.exec(await migration(name));
   for (const id of ["p0", "p1", "p2"]) {
     await db.query(`insert into public.post(id,topic,title,explanation,insight,deeper,status,verification_status,reviewed_at,concept_ids,sources,editorial_note)
@@ -42,5 +42,13 @@ test("tracks: up to ten pinned fields, the reader's own", async () => {
   await role("authenticated", stranger);
   assert.equal((await db.query("select count(*)::int n from public.track")).rows[0].n, 0);
   await assert.rejects(db.query("select public.set_track('ethics', true)"), /Private account required/);
+  await db.exec("reset role");
+});
+
+test("each post records which version of the difficulty scale graded it; unknown versions are refused", async () => {
+  await db.exec("reset role; set role service_role");
+  await db.query("update public.post set level_scale = 1 where id = 'p0'");
+  assert.equal((await db.query("select count(*)::int n from public.post where level_scale is null")).rows[0].n, 2);
+  await assert.rejects(db.query("update public.post set level_scale = 0 where id = 'p1'"), /check/);
   await db.exec("reset role");
 });

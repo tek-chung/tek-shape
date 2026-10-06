@@ -500,3 +500,18 @@ test("a headline the feed already has is screened out before any fetch or model 
   assert.deepEqual([calls, fetched, metrics.skippedAsKnown], [0, 0, 1]);
   assert.deepEqual(screened, [source.url]);
 });
+
+test("the difficulty scale is in the drafting instruction, and a level at odds with the prerequisites is noted, never held", async () => {
+  const { DRAFT_INSTRUCTION } = await import("../../scripts/content/engine.mjs");
+  const { levelWarnings, levels } = await import("../../scripts/content/levels.mjs");
+  for (const l of levels.levels) assert.ok(DRAFT_INSTRUCTION.includes(`${l.level} ${l.name}:`), l.name);
+  assert.deepEqual(levelWarnings({ difficulty: 4, assumes: [] }), ["Level 4 names no prerequisites"]);
+  assert.deepEqual(levelWarnings({ difficulty: 1, assumes: ["a-b", "c-d"] }), ["Level 1 lists 2 prerequisites"]);
+  assert.deepEqual(levelWarnings({ difficulty: 3, assumes: [] }), []);
+  const saved = [];
+  await draftCandidates({ groups:[group], retrieve:async()=>response, checks:"off", save:async(c)=>saved.push(c),
+    generate:async()=>({ ...structuredClone(draft), difficulty: 5, assumes: [] }) });
+  assert.equal(saved.length, 1);
+  assert.deepEqual(saved[0].checks.warnings, ["Level 5 names no prerequisites"]);
+  assert.equal(saved[0].status, "checked", "a warning does not hold the draft");
+});

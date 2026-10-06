@@ -24,6 +24,8 @@ export interface Post extends SeedPost {
   /** When the post joined this reader's feed (feed_page only). */
   queuedAt?: string;
   contentType?: "news" | "evergreen";
+  /** Level 1–5 on the difficulty scale (src/data/levels.json); absent for excerpts, which are not graded. */
+  difficulty?: number;
   eventDate?: string;
   sources?: { url: string; publisher: string; title: string; articleDate: string | null; accessedAt: string; author?: string; licence?: string }[];
   /**

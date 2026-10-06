@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { placeOf } from "@/lib/taxonomy";
+import { levelOf } from "@/lib/levels";
 import { ArrowUpRight, BookText } from "lucide-react";
 import type { Post, PostState } from "@/types/post";
 import type { PostPatch } from "@/lib/storage";
@@ -35,9 +36,11 @@ export function PostCard({ post, index, state, disabled, onChange, onRead, onWhy
   const link = post.source ?? (first ? { label: `${first.publisher}: ${first.title}`, url: first.url } : null);
   const extra = post.sources && post.sources.length > 1 ? post.sources : [];
   const label = post.status !== "published" ? "SAMPLE" : excerpt ? "EXCERPT" : post.contentType === "news" ? "NEWS" : "EVERGREEN";
+  // The level on the difficulty scale, shown short ("L3"), named in full for screen readers and on hover.
+  const level = levelOf(post.difficulty);
   return <article id={post.id} data-post-id={post.id} aria-labelledby={`title-${post.id}`} className="post-card" tabIndex={-1}>
     <div className="post-body">
-      <div className="post-meta"><span className={`topic topic-${index % 4}`} title={place ? `${place.umbrella.label} › ${place.field.label}` : post.topic}>{place && place.field.id !== "general" ? place.field.label : post.topic}{post.subtopic && place?.field.id !== "general" ? <span className="subtopic"> · {post.subtopic}</span> : null}</span><span className="sample">{label}</span>{onWhy && <button type="button" className="why-button" aria-expanded={whyOpen} aria-controls={`why-${post.id}`} onClick={toggleWhy}>Why?<span className="sr-only"> Why this post is in your feed</span></button>}<span className="post-number">{String(index + 1).padStart(2, "0")}</span></div>
+      <div className="post-meta"><span className={`topic topic-${index % 4}`} title={place ? `${place.umbrella.label} › ${place.field.label}` : post.topic}>{place && place.field.id !== "general" ? place.field.label : post.topic}{post.subtopic && place?.field.id !== "general" ? <span className="subtopic"> · {post.subtopic}</span> : null}</span><span className="sample">{label}{level && <> · <abbr title={`Level ${level.level}, ${level.name}: assumes ${level.assumes}`} aria-label={`Level ${level.level}, ${level.name}`}>L{level.level}</abbr></>}</span>{onWhy && <button type="button" className="why-button" aria-expanded={whyOpen} aria-controls={`why-${post.id}`} onClick={toggleWhy}>Why?<span className="sr-only"> Why this post is in your feed</span></button>}<span className="post-number">{String(index + 1).padStart(2, "0")}</span></div>
       {whyOpen && <div id={`why-${post.id}`} className="why" role="note">
         {why ? why.map((line) => <p key={line}>{line}</p>) : <p>Loading…</p>}
       </div>}

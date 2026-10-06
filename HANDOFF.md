@@ -609,6 +609,17 @@ Migration `202610080001_tracks.sql` (additive): `track` (user, field; reader-rea
   `useList("latest", …, field)` filters by the chosen one. Tracks do not change ranking.
 - Tests: SQL 72 (tracks), client 9 (`atlasTiles`). tsc and ESLint pass. Not run: build, Playwright, phone.
 
+## 5aa. Difficulty scale (9 Oct 2026, Claude)
+
+`src/data/levels.json` (version 1): Orientation, Grounding, Mechanism, Specialist, Frontier, each with what it
+assumes, what it does and an example; SPEC §3 states it. `scripts/content/levels.mjs` (`LEVELS_PROMPT`,
+`levelWarnings`) feeds `DRAFT_INSTRUCTION`; drafts whose level disagrees with their prerequisites carry
+`checks.warnings` (shown by `review`), never held. Migration `202610090001_levels.sql`: `post.level_scale`
+(null = graded before the scale). `publish` sets it for drafted posts; `npm run content -- regrade` grades older
+posts on the scale, one small AI call each, `CONTENT_REGRADE_LIMIT` (100) a run, excerpts never. Taste ignores
+excerpts for target difficulty. Cards show "L3" after the type label (`src/lib/levels.ts`). Tests: content 140,
+SQL (tracks file) +1.
+
 That completes the agreed T-Mixer plan. Next: a week or two of reading, then tune from the report card.
 Older list, for reference: Atlas,
 Tracks; tuning from the report card once a week or two of mixer-1 readings exist.
