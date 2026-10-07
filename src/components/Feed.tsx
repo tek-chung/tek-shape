@@ -97,10 +97,21 @@ export function Feed({
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
   }, [reading]);
-  const current = useRef({ state, saveProgress, savePost, loadMore });
+  const current = useRef({ state, posts, saveProgress, savePost, loadMore });
   useEffect(() => {
-    current.current = { state, saveProgress, savePost, loadMore };
+    current.current = { state, posts, saveProgress, savePost, loadMore };
   });
+  /**
+   * Reading a feed post means everything above it has been passed: mark those read too, so a quick scroll
+   * past a post does not leave it waiting in the feed after Refresh. Only the feed has this order; the other
+   * views are lists of things already chosen.
+   */
+  const markReadAbove = useCallback((id: string) => {
+    const { state: latest, posts: feed, savePost: save } = current.current;
+    const at = feed.findIndex((post) => post.id === id);
+    for (const post of feed.slice(0, Math.max(0, at)))
+      if (!latest.posts[post.id]?.readAt) save(post.id, { read: true });
+  }, []);
   const position = useRef<ReadingPosition | null>(null);
   const sentinel = useRef<HTMLDivElement | null>(null);
 
@@ -167,7 +178,9 @@ export function Feed({
               timers.set(
                 entry.target,
                 setTimeout(() => {
-                  if (document.visibilityState === "visible") current.current.savePost(id, { read: true });
+                  if (document.visibilityState !== "visible") return;
+                  current.current.savePost(id, { read: true });
+                  markReadAbove(id);
                 }, 5000),
               );
           } else {
@@ -184,7 +197,7 @@ export function Feed({
       observer.disconnect();
       timers.forEach(clearTimeout);
     };
-  }, [ready, view, posts]);
+  }, [ready, view, posts, markReadAbove]);
 
   // Reading time: how long each post is in view (half of it on screen, or half the screen filled by it), with
   // the app visible. Reported as each visit ends, so a quick skip is recorded as well as a long read. A single
@@ -255,6 +268,7 @@ export function Feed({
     // Rating, saving, opening the deeper explanation or the original all show the post was read. The server
     // now records that itself; the explicit flag keeps it so on a database without that migration.
     savePost(id, state.posts[id]?.readAt ? patch : { ...patch, read: true });
+    if (view === "feed") markReadAbove(id);
     if (patch.rating !== undefined)
       setAnnouncement(patch.rating ? `${ratingLabels[patch.rating]} recorded.` : "Rating cleared.");
     else if (patch.bookmarked !== undefined)
