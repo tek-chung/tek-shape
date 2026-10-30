@@ -740,6 +740,14 @@ async function check() {
     await attempt("Migration 202610040001 (concepts)",
       async () => { await result(db.from("post").select("assumes").limit(1)); await result(db.from("concept_alias").select("alias").limit(1)); },
       "apply supabase/migrations/202610040001_concepts.sql; until then Harder works per field rather than per idea");
+    // 202610050001 (stem) changes a function only, which the service role cannot probe; it is not listed.
+    for (const [name, table, columns, hint] of [
+      ["202610060001 (briefing and echoes)", "briefing", "post_id", "the Briefing ring and Echo cards"],
+      ["202610070001 (Dear T)", "dear_t", "id", "Dear T requests"],
+      ["202610080001 (tracks)", "track", "field", "Tracks on Latest"],
+      ["202610090001 (difficulty scale)", "post", "level_scale", "`regrade` and recording the scale"],
+    ]) await attempt(`Migration ${name}`, async () => { await result(db.from(table).select(columns).limit(1)); },
+      `apply supabase/migrations/${name.split(" ")[0]}_*.sql; until then there is no ${hint}`);
     await attempt("Enrolled reader", async () => {
       const rows = await result(db.from("allowed_reader").select("user_id"));
       if (rows.length !== 1) throw new Error(`${rows.length} enrolled`);
@@ -977,6 +985,15 @@ async function main() {
 try {
   await main();
 } catch (error) {
-  console.error(`Content engine stopped: ${error.message}`);
+  // "fetch failed" alone says nothing: name the network error and, on your own machine (never in CI, whose
+  // logs are public), the host that could not be reached.
+  const cause = error?.cause;
+  const code = cause?.code ?? cause?.errno ?? null;
+  const host = !process.env.CI && (cause?.hostname ?? cause?.host ?? null);
+  console.error(`Content engine stopped: ${error.message}${code ? ` (${code}${host ? ` reaching ${host}` : ""})` : ""}`);
+  if (/fetch failed/i.test(String(error?.message))) {
+    console.error("A network request failed before any answer came back. Run `npm run content -- check` to see which connection; "
+      + "if it is Supabase, check the project is not paused (supabase.com dashboard) and that this network allows it.");
+  }
   process.exitCode = 1;
 }
